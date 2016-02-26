@@ -3,10 +3,16 @@
 \usepackage[english]{babel}
 \usepackage{hyperref}
 \usepackage{listings}
-\author{Lennart Poettering}
+\author{
+    Lennart Poettering\\
+    \texttt{Author of the Handbook}
+    \and
+    Christian Rebischke\\
+    \texttt{Merged everything together}
+}
 \lstset{
-basicstyle=\tiny,
-frame=single
+    basicstyle=\tiny,
+    frame=single
 }
 \setlength{\parindent}{0pt}
 \begin{document}
@@ -27,6 +33,13 @@ every post I will try to explain one new feature of systemd. Many of these
 features are small and simple, so these stories should be interesting to a
 broader audience. However, from time to time we'll dive a little bit deeper
 into the great new features systemd provides you with.  
+\section{Disclaimer}
+This handbook is written by Lennart Poettering. There are maybe some 
+additions, cuts or other changes for increasing readability.
+Please visit Lennarts Blog for the original Blogposts:
+\\
+\\
+\url{https://0pointer.de/blog}
 \newpage
 \section{Verifying Bootup}
 Traditionally, when booting up a Linux system, you see a lot of little
