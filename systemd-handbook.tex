@@ -91,8 +91,7 @@ JOB    = Pending job for the unit.
 [root@lambda] ~#
 \end{lstlisting}
 (I have shortened the output above a little, and removed a few lines not relevant for this blog post.)
-
-Look at the ACTIVE column, which shows you the high-level state of a service (or in fact of any kind of unit systemd maintains, which can be more than just services, but we'll have a look on this in a later blog posting), whether it is active (i.e. running), inactive (i.e. not running) or in any other state. If you look closely you'll see one item in the list that is marked maintenance and highlighted in red. This informs you about a service that failed to run or otherwise encountered a problem. In this case this is ntpd. Now, let's find out what actually happened to ntpd, with the systemctl status command:
+Look at the ACTIVE column, which shows you the high-level state of a service (or in fact of any kind of unit systemd maintains, which can be more than just services, but we'll have a look on this in a later blog posting), whether it is \textbf{active} (i.e. running), \textbf{inactive} (i.e. not running) or in any other state. If you look closely you'll see one item in the list that is marked \textbf{maintenance} and highlighted in red. This informs you about a service that failed to run or otherwise encountered a problem. In this case this is ntpd. Now, let's find out what actually happened to ntpd, with the \textit{systemctl status} command:
 \begin{lstlisting}
 [root@lambda] ~# systemctl status ntpd.service
 ntpd.service - Network Time Service
@@ -101,7 +100,15 @@ ntpd.service - Network Time Service
         Main: 953 (code=exited, status=255)
       CGroup: name=systemd:/systemd-1/ntpd.service
 [root@lambda] ~#
-\end{listlisting}
+\end{lstlisting}
+This shows us that NTP terminated during runtime (when it ran as PID 953), and tells us exactly the error condition: the process exited with an exit status of 255.
+\\
+\\
+In a later systemd version, we plan to hook this up to ABRT, \href{https://bugzilla.redhat.com/show_bug.cgi?id=622773}{as soon as this enhancement request is fixed}. Then, if systemctl status shows you information about a service that crashed it will direct you right-away to the appropriate crash dump in ABRT.
+\\
+\\
+\textbf{Summary}: use \textit{systemctl} and \textit{systemctl status} as modern, more complete replacements for the traditional boot-up status messages of SysV services. \textit{systemctl status} not only captures in more detail the error condition but also shows runtime errors in addition to start-up errors.
+That's it for this week, make sure to come back next week, for the next posting about systemd for administrators!
 \section{References}
 \nocite{*}
 \bibliography{references}
