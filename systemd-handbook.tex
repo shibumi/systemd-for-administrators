@@ -5,7 +5,7 @@
 \usepackage{listings}
 \author{Lennart Poettering}
 \lstset{
-basicstyle=\footnotesize,
+basicstyle=\tiny,
 frame=single
 }
 \begin{document}
@@ -47,86 +47,40 @@ can query the state of all services, both systemd native and SysV/LSB
 services:
 \begin{lstlisting}
 [root@lambda] ~# systemctl
-UNIT                                          LOAD   ACTIVE       SUB          JOB             DESCRIPTION
-dev-hugepages.automount                       loaded active       running                      Huge Pages File System Automount Point
-dev-mqueue.automount                          loaded active       running                      POSIX Message Queue File System Automount Point
-proc-sys-fs-binfmt_misc.automount             loaded active       waiting                      Arbitrary Executable File Formats File System Automount Point
-sys-kernel-debug.automount                    loaded active       waiting                      Debug File System Automount Point
-sys-kernel-security.automount                 loaded active       waiting                      Security File System Automount Point
-sys-devices-pc...0000:02:00.0-net-eth0.device loaded active       plugged                      82573L Gigabit Ethernet Controller
-[...]
-sys-devices-virtual-tty-tty9.device           loaded active       plugged                      /sys/devices/virtual/tty/tty9
--.mount                                       loaded active       mounted                      /
-boot.mount                                    loaded active       mounted                      /boot
-dev-hugepages.mount                           loaded active       mounted                      Huge Pages File System
-dev-mqueue.mount                              loaded active       mounted                      POSIX Message Queue File System
-home.mount                                    loaded active       mounted                      /home
-proc-sys-fs-binfmt_misc.mount                 loaded active       mounted                      Arbitrary Executable File Formats File System
-abrtd.service                                 loaded active       running                      ABRT Automated Bug Reporting Tool
-accounts-daemon.service                       loaded active       running                      Accounts Service
-acpid.service                                 loaded active       running                      ACPI Event Daemon
-atd.service                                   loaded active       running                      Execution Queue Daemon
-auditd.service                                loaded active       running                      Security Auditing Service
-avahi-daemon.service                          loaded active       running                      Avahi mDNS/DNS-SD Stack
-bluetooth.service                             loaded active       running                      Bluetooth Manager
-console-kit-daemon.service                    loaded active       running                      Console Manager
-cpuspeed.service                              loaded active       exited                       LSB: processor frequency scaling support
-crond.service                                 loaded active       running                      Command Scheduler
-cups.service                                  loaded active       running                      CUPS Printing Service
-dbus.service                                  loaded active       running                      D-Bus System Message Bus
-getty@tty2.service                            loaded active       running                      Getty on tty2
-getty@tty3.service                            loaded active       running                      Getty on tty3
-getty@tty4.service                            loaded active       running                      Getty on tty4
-getty@tty5.service                            loaded active       running                      Getty on tty5
-getty@tty6.service                            loaded active       running                      Getty on tty6
-haldaemon.service                             loaded active       running                      Hardware Manager
-hdapsd@sda.service                            loaded active       running                      sda shock protection daemon
-irqbalance.service                            loaded active       running                      LSB: start and stop irqbalance daemon
-iscsi.service                                 loaded active       exited                       LSB: Starts and stops login and scanning of iSCSI devices.
-iscsid.service                                loaded active       exited                       LSB: Starts and stops login iSCSI daemon.
-livesys-late.service                          loaded active       exited                       LSB: Late init script for live image.
-livesys.service                               loaded active       exited                       LSB: Init script for live image.
-lvm2-monitor.service                          loaded active       exited                       LSB: Monitoring of LVM2 mirrors, snapshots etc. using dmeventd or progress polling
-mdmonitor.service                             loaded active       running                      LSB: Start and stop the MD software RAID monitor
-modem-manager.service                         loaded active       running                      Modem Manager
-netfs.service                                 loaded active       exited                       LSB: Mount and unmount network filesystems.
-NetworkManager.service                        loaded active       running                      Network Manager
-ntpd.service                                  loaded maintenance  maintenance                  Network Time Service
-polkitd.service                               loaded active       running                      Policy Manager
-prefdm.service                                loaded active       running                      Display Manager
-rc-local.service                              loaded active       exited                       /etc/rc.local Compatibility
-rpcbind.service                               loaded active       running                      RPC Portmapper Service
-rsyslog.service                               loaded active       running                      System Logging Service
-rtkit-daemon.service                          loaded active       running                      RealtimeKit Scheduling Policy Service
-sendmail.service                              loaded active       running                      LSB: start and stop sendmail
-sshd@172.31.0.53:22-172.31.0.4:36368.service  loaded active       running                      SSH Per-Connection Server
-sysinit.service                               loaded active       running                      System Initialization
-systemd-logger.service                        loaded active       running                      systemd Logging Daemon
-udev-post.service                             loaded active       exited                       LSB: Moves the generated persistent udev rules to /etc/udev/rules.d
-udisks.service                                loaded active       running                      Disk Manager
-upowerd.service                               loaded active       running                      Power Manager
-wpa_supplicant.service                        loaded active       running                      Wi-Fi Security Service
-avahi-daemon.socket                           loaded active       listening                    Avahi mDNS/DNS-SD Stack Activation Socket
-cups.socket                                   loaded active       listening                    CUPS Printing Service Sockets
-dbus.socket                                   loaded active       running                      dbus.socket
-rpcbind.socket                                loaded active       listening                    RPC Portmapper Socket
-sshd.socket                                   loaded active       listening                    sshd.socket
-systemd-initctl.socket                        loaded active       listening                    systemd /dev/initctl Compatibility Socket
-systemd-logger.socket                         loaded active       running                      systemd Logging Socket
-systemd-shutdownd.socket                      loaded active       listening                    systemd Delayed Shutdown Socket
-dev-disk-by\x1...x1db22a\x1d870f1adf2732.swap loaded active       active                       /dev/disk/by-uuid/fd626ef7-34a4-4958-b22a-870f1adf2732
-basic.target                                  loaded active       active                       Basic System
-bluetooth.target                              loaded active       active                       Bluetooth
-dbus.target                                   loaded active       active                       D-Bus
-getty.target                                  loaded active       active                       Login Prompts
-graphical.target                              loaded active       active                       Graphical Interface
-local-fs.target                               loaded active       active                       Local File Systems
-multi-user.target                             loaded active       active                       Multi-User
-network.target                                loaded active       active                       Network
-remote-fs.target                              loaded active       active                       Remote File Systems
-sockets.target                                loaded active       active                       Sockets
-swap.target                                   loaded active       active                       Swap
-sysinit.target                                loaded active       active                       System Initialization
+UNIT                                          LOAD   ACTIVE       SUB        
+dev-hugepages.automount                       loaded active       running    
+dev-mqueue.automount                          loaded active       running    
+proc-sys-fs-binfmt_misc.automount             loaded active       waiting    
+sys-kernel-debug.automount                    loaded active       waiting    
+sys-kernel-security.automount                 loaded active       waiting    
+sys-devices-pc...0000:02:00.0-net-eth0.device loaded active       plugged    
+sys-devices-virtual-tty-tty9.device           loaded active       plugged    
+-.mount                                       loaded active       mounted    
+boot.mount                                    loaded active       mounted    
+dev-hugepages.mount                           loaded active       mounted    
+dev-mqueue.mount                              loaded active       mounted    
+home.mount                                    loaded active       mounted    
+proc-sys-fs-binfmt_misc.mount                 loaded active       mounted    
+abrtd.service                                 loaded active       running    
+bus.service                                  loaded active       running    
+getty@tty2.service                            loaded active       running    
+getty@tty3.service                            loaded active       running    
+getty@tty4.service                            loaded active       running    
+getty@tty5.service                            loaded active       running    
+getty@tty6.service                            loaded active       running    
+haldaemon.service                             loaded active       running    
+hdapsd@sda.service                            loaded active       running    
+irqbalance.service                            loaded active       running    
+iscsi.service                                 loaded active       exited     
+iscsid.service                                loaded active       exited     
+livesys-late.service                          loaded active       exited     
+livesys.service                               loaded active       exited     
+lvm2-monitor.service                          loaded active       exited     
+mdmonitor.service                             loaded active       running    
+modem-manager.service                         loaded active       running    
+netfs.service                                 loaded active       exited     
+NetworkManager.service                        loaded active       running    
+ntpd.service                                  loaded maintenance  maintenance
 
 LOAD   = Reflects whether the unit definition was properly loaded.
 ACTIVE = The high-level unit activation state, i.e. generalization of SUB.
