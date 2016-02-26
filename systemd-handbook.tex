@@ -227,6 +227,16 @@ $ systemd-cgls
   |   \ 1332 /sbin/mingetty tty2
    \ 28191 /sbin/udevd -d
 \end{lstlisting}
+(This too is shortened, the same way)
+\\
+\\
+As you can see, this command shows the processes by their cgroup and hence service, as systemd labels the cgroups after the services. For example, you can easily see that the auditing service auditd.service spawns three individual processes, auditd, audisp and sedispatch.
+\\
+\\
+If you look closely you will notice that a number of processes have been assigned to the cgroup /user/1. At this point let's simply leave it at that systemd not only maintains services in cgroups, but user session processes as well. In a later installment we'll discuss in more detail what this about.
+\\
+\\
+So much for now, come back soon for the next installment!
 \section{References}
 \nocite{*}
 \bibliography{references}
