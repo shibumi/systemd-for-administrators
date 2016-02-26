@@ -90,6 +90,18 @@ JOB    = Pending job for the unit.
 221 units listed. Pass --all to see inactive units, too.
 [root@lambda] ~#
 \end{lstlisting}
+(I have shortened the output above a little, and removed a few lines not relevant for this blog post.)
+
+Look at the ACTIVE column, which shows you the high-level state of a service (or in fact of any kind of unit systemd maintains, which can be more than just services, but we'll have a look on this in a later blog posting), whether it is active (i.e. running), inactive (i.e. not running) or in any other state. If you look closely you'll see one item in the list that is marked maintenance and highlighted in red. This informs you about a service that failed to run or otherwise encountered a problem. In this case this is ntpd. Now, let's find out what actually happened to ntpd, with the systemctl status command:
+\begin{lstlisting}
+[root@lambda] ~# systemctl status ntpd.service
+ntpd.service - Network Time Service
+      Loaded: loaded (/etc/systemd/system/ntpd.service)
+      Active: maintenance
+        Main: 953 (code=exited, status=255)
+      CGroup: name=systemd:/systemd-1/ntpd.service
+[root@lambda] ~#
+\end{listlisting}
 \section{References}
 \nocite{*}
 \bibliography{references}
