@@ -1,0 +1,30 @@
+\documentclass[titlepage]{article}
+\title{Systemd for Administrators}
+\usepackage[english]{babel}
+\usepackage{hyperref}
+\usepackage{listings}
+\author{lennart Poettering}
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{Abstract}
+As many of you know,
+\href{https://www.freedesktop.org/wiki/Software/systemd}{systemd} is the new
+Fedora init system, starting with F14, and it is also on its way to being
+adopted in a number of other distributions as well (for example,
+\href{https://en.opensuse.org/SDB:Systemd}{OpenSUSE}). For administrators
+systemd provides a variety of new features and changes and enhances the
+administrative process substantially. This blog story is the first part of a
+series of articles I plan to post roughly every week for the next months. In
+every post I will try to explain one new feature of systemd. Many of these
+features are small and simple, so these stories should be interesting to a
+broader audience. However, from time to time we'll dive a little bit deeper
+into the great new features systemd provides you with.  
+\section{References}
+\nocite{*}
+\bibliography{references}
+\bibliographystyle{plain}
+\listoffigures
+\end{document}
