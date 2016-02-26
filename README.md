@@ -1,2 +1,7 @@
 # systemd-for-administrators
-This will be Poetterings "Systemd for Administrators"-Blogposts as PDF.
+
+## Guidelines
+
+* Use \textbf for important stuff
+* Use \textit for commands like: systemctl status
+* Use \begin{lstlisting} for snippets
