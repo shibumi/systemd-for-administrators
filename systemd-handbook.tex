@@ -576,10 +576,10 @@ To see the effect of our two little optimizations here are two graphs generated 
 \includegraphics[scale=0.1]{blame.png}
 \includegraphics[scale=0.1]{blame2.png}
 \\
-(For the sake of completeness, here are the two complete outputs of systemd-analyze blame for these two boots: before and after.)
+(For the sake of completeness, here are the two complete outputs of systemd-analyze blame for these two boots: \href{https://0pointer.de/public/blame.txt}{before} and \href{https://0pointer.de/public/blame2.txt}{after}.)
 \\
 \\
-The well-informed reader probably wonders how this relates to Michael Meeks' bootchart. This plot and bootchart do show similar graphs, that is true. Bootchart is by far the more powerful tool. It plots in all detail what is happening during the boot, how much CPU and IO is used. systemd-analyze plot shows more high-level data: which service took how much time to initialize, and what needed to wait for it. If you use them both together you'll have a wonderful toolset to figure out why your boot is not as fast as it could be.
+The well-informed reader probably wonders how this relates to \href{https://github.com/mmeeks/bootchart}{Michael Meeks' bootchart}. This plot and bootchart do show similar graphs, that is true. Bootchart is by far the more powerful tool. It plots in all detail what is happening during the boot, how much CPU and IO is used. systemd-analyze plot shows more high-level data: which service took how much time to initialize, and what needed to wait for it. If you use them both together you'll have a wonderful toolset to figure out why your boot is not as fast as it could be.
 \\
 \\
 Now, before you now take these tools and start filing bugs against the worst boot-up time offenders on your system: think twice. These tools give you raw data, don't misread it. As my optimization example above hopefully shows, the blame for the slow bootup was not actually with udev-settle.service, and not with the ModemManager prober run by it either. It is with the subsystem that pulled this service in in the first place. And that's where the problem needs to be fixed. So, file the bugs at the right places. Put the blame where the blame belongs.
