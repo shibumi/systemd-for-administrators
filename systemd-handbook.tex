@@ -511,6 +511,7 @@ systemd[1]: Startup finished in 2s 65ms 924us (kernel)
 And here's how you read this: 2s have been spent for kernel initialization, until the time where the initial RAM disk (initrd, i.e. dracut) was started. A bit less than 3s have then been spent in the initrd. Finally, a bit less than 12s have been spent after the actual system init daemon (systemd) has been invoked by the initrd to bring up userspace. Summing this up the time that passed since the boot loader jumped into the kernel code until systemd was finished doing everything it needed to do at boot was a bit less than 17s. This number is nice and simple to understand -- and also easy to misunderstand: it does not include the time that is spent initializing your GNOME session, as that is outside of the scope of the init system. Also, in many cases this is just where systemd finished doing everything it needed to do. Very likely some daemons are still busy doing whatever they need to do to finish startup when this time is elapsed. Hence: while the time logged here is a good indication on the general boot speed, it is not the time the user might feel the boot actually takes.
 
 Also, it is a pretty superficial value: it gives no insight which system component systemd was waiting for all the time. To break this up, we introduced the tool systemd-analyze blame:
+\newpage
 \begin{lstlisting}
 $ systemd-analyze blame
   6207ms udev-settle.service
@@ -574,6 +575,32 @@ It creates pretty graphs, showing the time services spent to start up in relatio
 To see the effect of our two little optimizations here are two graphs generated with systemd-analyze plot, the first before and the other after our change:
 \includegraphics[scale=0.1]{blame.png}
 \includegraphics[scale=0.1]{blame2.png}
+\\
+(For the sake of completeness, here are the two complete outputs of systemd-analyze blame for these two boots: before and after.)
+\\
+\\
+The well-informed reader probably wonders how this relates to Michael Meeks' bootchart. This plot and bootchart do show similar graphs, that is true. Bootchart is by far the more powerful tool. It plots in all detail what is happening during the boot, how much CPU and IO is used. systemd-analyze plot shows more high-level data: which service took how much time to initialize, and what needed to wait for it. If you use them both together you'll have a wonderful toolset to figure out why your boot is not as fast as it could be.
+\\
+\\
+Now, before you now take these tools and start filing bugs against the worst boot-up time offenders on your system: think twice. These tools give you raw data, don't misread it. As my optimization example above hopefully shows, the blame for the slow bootup was not actually with udev-settle.service, and not with the ModemManager prober run by it either. It is with the subsystem that pulled this service in in the first place. And that's where the problem needs to be fixed. So, file the bugs at the right places. Put the blame where the blame belongs.
+\\
+\\
+As mentioned, these three utilities are available on your Fedora 15 system out-of-the-box.
+\\
+\\
+And here's what to take home from this little blog story:
+\begin{itemize}
+\item
+systemd-analyze is a wonderful tool and systemd comes with profiling built in.
+\item
+Don't misread the data these tools generate!
+\item
+With two simple changes you might be able to speed up your system by 7s!
+\item
+Fix your software if it can't handle dynamic hardware properly!
+\item
+The Fedora default of installing the OS on an enterprise-level storage managing system might be something to rethink.
+\end{itemize}
 \section{References}
 \nocite{*}
 \bibliography{references}
