@@ -725,9 +725,6 @@ Of course, there's one very good reason for supporting these files for a bit lon
 \\
 \\
 If compatibility is important, then systemd will still allow you to read these configuration files even if you otherwise use native systemd unit files. If your sysconfig file only knows simple options EnvironmentFile=-/etc/sysconfig/foobar (See systemd.exec(5) for more information about this option.) may be used to import the settings into the environment and use them to put together command lines. If you need a programming language to make sense of these settings, then use a programming language like shell. For example, place an short shell script in /usr/lib/<your package>/ which reads these files for compatibility, and then exec's the actual daemon binary. Then spawn this script instead of the actual daemon binary with ExecStart= in the unit file.
-\\
-\\
-And this is all for now. Thank you very much for your interest.
 \section{references}
 \nocite{*}
 \bibliography{references}
