@@ -1033,7 +1033,7 @@ To easily check which processes on your system retain which capabilities use the
 \\
 Making use of systemd's CapabilityBoundingSet= option is often a simple, discoverable and cheap replacement for patching all system daemons individually to control the capability bounding set on their own.
 \subsection{Disallowing Forking, Limiting File Creation for Services}
-Resource Limits may be used to apply certain security limits on services being run. Primarily, resource limits are useful for resource control (as the name suggests...) not so much access control. However, two of them can be useful to disable certain OS features: RLIMIT_NPROC and RLIMIT_FSIZE may be used to disable forking and disable writing of any files with a size > 0:
+Resource Limits may be used to apply certain security limits on services being run. Primarily, resource limits are useful for resource control (as the name suggests...) not so much access control. However, two of them can be useful to disable certain OS features: RLIMIT\_NPROC and RLIMIT\_FSIZE may be used to disable forking and disable writing of any files with a size > 0:
 \begin{lstlisting}
 ...
 [Service]
@@ -1042,7 +1042,7 @@ LimitNPROC=1
 LimitFSIZE=0
 ...
 \end{lstlisting}
-Note that this will work only if the service in question drops privileges and runs under a (non-root) user ID of its own or drops the CAP_SYS_RESOURCE capability, for example via CapabilityBoundingSet= as discussed above. Without that a process could simply increase the resource limit again thus voiding any effect.
+Note that this will work only if the service in question drops privileges and runs under a (non-root) user ID of its own or drops the CAP\_SYS\_RESOURCE capability, for example via CapabilityBoundingSet= as discussed above. Without that a process could simply increase the resource limit again thus voiding any effect.
 \\
 \\
 Caveat: LimitFSIZE= is pretty brutal. If the service attempts to write a file with a size > 0, it will immeidately be killed with the SIGXFSZ which unless caught terminates the process. Also, creating files with size 0 is still allowed, even if this option is used.
@@ -1070,6 +1070,56 @@ If you are wondering why these options are not enabled by default: some of them 
 \\
 \\
 And that's it for now. If you are working on unit files for upstream or in your distribution, please consider using one or more of the options listed above. If you service is secure by default by taking advantage of these options this will help not only your users but also make the Internet a safer place.
+\section{Log and Service Status}
+This one is a short episode. One of the most commonly used commands on a systemd system is systemctl status which may be used to determine the status of a service (or other unit). It always has been a valuable tool to figure out the processes, runtime information and other meta data of a daemon running on the system.
+\\
+\\
+With Fedora 17 we introduced the journal, our new logging scheme that provides structured, indexed and reliable logging on systemd systems, while providing a certain degree of compatibility with classic syslog implementations. The original reason we started to work on the journal was one specific feature idea, that to the outsider might appear simple but without the journal is difficult and inefficient to implement: along with the output of systemctl status we wanted to show the last 10 log messages of the daemon. Log data is some of the most essential bits of information we have on the status of a service. Hence it it is an obvious choice to show next to the general status of the service.
+\\
+\\
+And now to make it short: at the same time as we integrated the journal into systemd and Fedora we also hooked up systemctl with it. Here's an example output:
+\begin{lstlisting}
+$ systemctl status avahi-daemon.service
+avahi-daemon.service - Avahi mDNS/DNS-SD Stack
+      Loaded: loaded (/usr/lib/systemd/system/avahi-daemon.service; enabled)
+      Active: active (running) since Fri, 18 May 2012 12:27:37 +0200; 14s ago
+    Main PID: 8216 (avahi-daemon)
+      Status: "avahi-daemon 0.6.30 starting up."
+      CGroup: name=systemd:/system/avahi-daemon.service
+          ├ 8216 avahi-daemon: running [omega.local]
+          └ 8217 avahi-daemon: chroot helper
+
+May 18 12:27:37 omega avahi-daemon[8216]: 
+Joining mDNS multicast group on interface eth1.IPv4 with address 172.31.0.52.
+May 18 12:27:37 omega avahi-daemon[8216]: 
+New relevant interface eth1.IPv4 for mDNS.
+May 18 12:27:37 omega avahi-daemon[8216]: 
+Network interface enumeration completed.
+May 18 12:27:37 omega avahi-daemon[8216]: 
+Registering new address record for 192.168.122.1 on virbr0.IPv4.
+May 18 12:27:37 omega avahi-daemon[8216]: 
+Registering new address record for fd00::e269:95ff:fe87:e282 on eth1.*.
+May 18 12:27:37 omega avahi-daemon[8216]: 
+Registering new address record for 172.31.0.52 on eth1.IPv4.
+May 18 12:27:37 omega avahi-daemon[8216]: 
+Registering HINFO record with values 'X86_64'/'LINUX'.
+May 18 12:27:38 omega avahi-daemon[8216]: 
+Server startup complete. Host name is omega.local. Local service cookie is 3555095952.
+May 18 12:27:38 omega avahi-daemon[8216]: 
+Service "omega" (/services/ssh.service) successfully established.
+May 18 12:27:38 omega avahi-daemon[8216]: 
+Service "omega" (/services/sftp-ssh.service) successfully established.
+\end{lstlisting}
+This, of course, shows the status of everybody's favourite mDNS/DNS-SD daemon with a list of its processes, along with -- as promised -- the 10 most recent log lines. Mission accomplished!
+\\
+\\
+There are a couple of switches available to alter the output slightly and adjust it to your needs. The two most interesting switches are -f to enable follow mode (as in tail -f) and -n to change the number of lines to show (you guessed it, as in tail -n).
+\\
+\\
+The log data shown comes from three sources: everything any of the daemon's processes logged with libc's syslog() call, everything submitted using the native Journal API, plus everything any of the daemon's processes logged to STDOUT or STDERR. In short: everything the daemon generates as log data is collected, properly interleaved and shown in the same format.
+\\
+\\
+And that's it already for today. It's a very simple feature, but an immensely useful one for every administrator. One of the kind "Why didn't we already do this 15 years ago?".
 \section{references}
 \nocite{*}
 \bibliography{references}
