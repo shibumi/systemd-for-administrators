@@ -1120,6 +1120,86 @@ The log data shown comes from three sources: everything any of the daemon's proc
 \\
 \\
 And that's it already for today. It's a very simple feature, but an immensely useful one for every administrator. One of the kind "Why didn't we already do this 15 years ago?".
+\section{The Self-Explanatory Boot}
+One complaint we often hear about systemd is that its boot process was hard to understand, even incomprehensible. In general I can only disagree with this sentiment, I even believe in quite the opposite: in comparison to what we had before -- where to even remotely understand what was going on you had to have a decent comprehension of the programming language that is Bourne Shell[1] -- understanding systemd's boot process is substantially easier. However, like in many complaints there is some truth in this frequently heard discomfort: for a seasoned Unix administrator there indeed is a bit of learning to do when the switch to systemd is made. And as systemd developers it is our duty to make the learning curve shallow, introduce as few surprises as we can, and provide good documentation where that is not possible.
+\\
+\\
+systemd always had huge body of documentation as manual pages (nearly 100 individual pages now!), in the Wiki and the various blog stories I posted. However, any amount of documentation alone is not enough to make software easily understood. In fact, thick manuals sometimes appear intimidating and make the reader wonder where to start reading, if all he was interested in was this one simple concept of the whole system.
+\\
+\\
+Acknowledging all this we have now added a new, neat, little feature to systemd: the self-explanatory boot process. What do we mean by that? Simply that each and every single component of our boot comes with documentation and that this documentation is closely linked to its component, so that it is easy to find.
+\\
+\\
+More specifically, all units in systemd (which are what encapsulate the components of the boot) now include references to their documentation, the documentation of their configuration files and further applicable manuals. A user who is trying to understand the purpose of a unit, how it fits into the boot process and how to configure it can now easily look up this documentation with the well-known systemctl status command. Here's an example how this looks for systemd-logind.service:
+\begin{lstlisting}
+$ systemctl status systemd-logind.service
+systemd-logind.service - Login Service
+      Loaded: loaded (/usr/lib/systemd/system/systemd-logind.service; static)
+      Active: 
+    active (running) since Mon, 25 Jun 2012 22:39:24 +0200; 1 day and 18h ago
+        Docs: man:systemd-logind.service(7)
+              man:logind.conf(5)
+              http://www.freedesktop.org/wiki/Software/systemd/multiseat
+    Main PID: 562 (systemd-logind)
+      CGroup: name=systemd:/system/systemd-logind.service
+          └ 562 /usr/lib/systemd/systemd-logind
+
+Jun 25 22:39:24 epsilon systemd-logind[562]: 
+Watching system buttons on /dev/input/event2 (Power Button)
+Jun 25 22:39:24 epsilon systemd-logind[562]: 
+Watching system buttons on /dev/input/event6 (Video Bus)
+Jun 25 22:39:24 epsilon systemd-logind[562]: 
+Watching system buttons on /dev/input/event0 (Lid Switch)
+Jun 25 22:39:24 epsilon systemd-logind[562]: 
+Watching system buttons on /dev/input/event1 (Sleep Button)
+Jun 25 22:39:24 epsilon systemd-logind[562]: 
+Watching system buttons on /dev/input/event7 (ThinkPad Extra Buttons)
+Jun 25 22:39:25 epsilon systemd-logind[562]: 
+New session 1 of user gdm.
+Jun 25 22:39:25 epsilon systemd-logind[562]: 
+Linked /tmp/.X11-unix/X0 to /run/user/42/X11-display.
+Jun 25 22:39:32 epsilon systemd-logind[562]: 
+New session 2 of user lennart.
+Jun 25 22:39:32 epsilon systemd-logind[562]: 
+Linked /tmp/.X11-unix/X0 to /run/user/500/X11-display.
+Jun 25 22:39:54 epsilon systemd-logind[562]: 
+Removed session 1.
+\end{lstlisting}
+On the first look this output changed very little. If you look closer however you will find that it now includes one new field: Docs lists references to the documentation of this service. In this case there are two man page URIs and one web URL specified. The man pages describe the purpose and configuration of this service, the web URL includes an introduction to the basic concepts of this service.
+\\
+\\
+If the user uses a recent graphical terminal implementation it is sufficient to click on the URIs shown to get the respective documentation[2]. With other words: it never has been that easy to figure out what a specific component of our boot is about: just use systemctl status to get more information about it and click on the links shown to find the documentation.
+\\
+\\
+The past days I have written man pages and added these references for every single unit we ship with systemd. This means, with systemctl status you now have a very easy way to find out more about every single service of the core OS.
+\\
+\\
+If you are not using a graphical terminal (where you can just click on URIs), a man page URI in the middle of the output of systemctl status is not the most useful thing to have. To make reading the referenced man pages easier we have also added a new command:
+\begin{lstlisting}
+systemctl help systemd-logind.service
+\end{lstlisting}
+Which will open the listed man pages right-away, without the need to click anything or copy/paste an URI.
+\\
+\\
+The URIs are in the formats documented by the uri(7) man page. Units may reference http and https URLs, as well as man and info pages.
+\\
+\\
+Of course all this doesn't make everything self-explanatory, simply because the user still has to find out about systemctl status (and even systemctl in the first place so that he even knows what units there are); however with this basic knowledge further help on specific units is in very easy reach.
+\\
+\\
+We hope that this kind of interlinking of runtime behaviour and the matching documentation is a big step forward to make our boot easier to understand.
+\\
+\\
+This functionality is partially already available in Fedora 17, and will show up in complete form in Fedora 18.
+\\
+\\
+That all said, credit where credit is due: this kind of references to documentation within the service descriptions is not new, Solaris' SMF had similar functionality for quite some time. However, we believe this new systemd feature is certainly a novelty on Linux, and with systemd we now offer you the best documented and best self-explaining init system.
+\\
+\\
+Of course, if you are writing unit files for your own packages, please consider also including references to the documentation of your services and its configuration. This is really easy to do, just list the URIs in the new Documentation= field in the [Unit] section of your unit files. For details see systemd.unit(5). The more comprehensively we include links to documentation in our OS services the easier the work of administrators becomes. (To make sure Fedora makes comprehensive use of this functionality I filed a bug on FPC).
+\\
+\\
+Oh, and BTW: if you are looking for a rough overview of systemd's boot process here's another new man page we recently added, which includes a pretty ASCII flow chart of the boot process and the units involved.
 \section{references}
 \nocite{*}
 \bibliography{references}
