@@ -804,6 +804,119 @@ As we can see the while the instance identifier is the escaped string the comman
 \\
 \\
 And at this point this shall be all for now. Stay tuned for a follow-up article on how instantiated services are used for inetd-style socket activation.
+\section{Converting inetd Services}
+In a previous episode of this series I covered how to convert a SysV init script to a systemd unit file. In this story I hope to explain how to convert inetd services into systemd units.
+\\
+\\
+Let's start with a bit of background. inetd has a long tradition as one of the classic Unix services. As a superserver it listens on an Internet socket on behalf of another service and then activate that service on an incoming connection, thus implementing an on-demand socket activation system. This allowed Unix machines with limited resources to provide a large variety of services, without the need to run processes and invest resources for all of them all of the time. Over the years a number of independent implementations of inetd have been shipped on Linux distributions. The most prominent being the ones based on BSD inetd and xinetd. While inetd used to be installed on most distributions by default, it nowadays is used only for very few selected services and the common services are all run unconditionally at boot, primarily for (perceived) performance reasons.
+\\
+\\
+One of the core feature of systemd (and Apple's launchd for the matter) is socket activation, a scheme pioneered by inetd, however back then with a different focus. Systemd-style socket activation focusses on local sockets (AF\_UNIX), not so much Internet sockets (AF\_INET), even though both are supported. And more importantly even, socket activation in systemd is not primarily about the on-demand aspect that was key in inetd, but more on increasing parallelization (socket activation allows starting clients and servers of the socket at the same time), simplicity (since the need to configure explicit dependencies between services is removed) and robustness (since services can be restarted or may crash without loss of connectivity of the socket). However, systemd can also activate services on-demand when connections are incoming, if configured that way.
+\\
+\\
+Socket activation of any kind requires support in the services themselves. systemd provides a very simple interface that services may implement to provide socket activation, built around sd\_listen\_fds(). As such it is already a very minimal, simple scheme. However, the traditional inetd interface is even simpler. It allows passing only a single socket to the activated service: the socket fd is simply duplicated to STDIN and STDOUT of the process spawned, and that's already it. In order to provide compatibility systemd optionally offers the same interface to processes, thus taking advantage of the many services that already support inetd-style socket activation, but not yet systemd's native activation.
+\\
+\\
+Before we continue with a concrete example, let's have a look at three different schemes to make use of socket activation:
+\begin{enumeration}
+\item Socket activation for parallelization, simplicity, robustness: sockets are bound during early boot and a singleton service instance to serve all client requests is immediately started at boot. This is useful for all services that are very likely used frequently and continously, and hence starting them early and in parallel with the rest of the system is advisable. Examples: D-Bus, Syslog.
+\item On-demand socket activation for singleton services: sockets are bound during early boot and a singleton service instance is executed on incoming traffic. This is useful for services that are seldom used, where it is advisable to save the resources and time at boot and delay activation until they are actually needed. Example: CUPS.
+\item On-demand socket activation for per-connection service instances: sockets are bound during early boot and for each incoming connection a new service instance is instantiated and the connection socket (and not the listening one) is passed to it. This is useful for services that are seldom used, and where performance is not critical, i.e. where the cost of spawning a new service process for each incoming connection is limited. Example: SSH.
+\end{enumeration}
+The three schemes provide different performance characteristics. After the service finishes starting up the performance provided by the first two schemes is identical to a stand-alone service (i.e. one that is started without a super-server, without socket activation), since the listening socket is passed to the actual service, and code paths from then on are identical to those of a stand-alone service and all connections are processes exactly the same way as they are in a stand-alone service. On the other hand, performance of the third scheme is usually not as good: since for each connection a new service needs to be started the resource cost is much higher. However, it also has a number of advantages: for example client connections are better isolated and it is easier to develop services activated this way.
+\\
+\\
+For systemd primarily the first scheme is in focus, however the other two schemes are supported as well. (In fact, the blog story I covered the necessary code changes for systemd-style socket activation in was about a service of the second type, i.e. CUPS). inetd primarily focusses on the third scheme, however the second scheme is supported too. (The first one isn't. Presumably due the focus on the third scheme inetd got its -- a bit unfair -- reputation for being "slow".)
+\\
+\\
+So much about the background, let's cut to the beef now and show an inetd service can be integrated into systemd's socket activation. We'll focus on SSH, a very common service that is widely installed and used but on the vast majority of machines probably not started more often than 1/h in average (and usually even much less). SSH has supported inetd-style activation since a long time, following the third scheme mentioned above. Since it is started only every now and then and only with a limited number of connections at the same time it is a very good candidate for this scheme as the extra resource cost is negligble: if made socket-activatable SSH is basically free as long as nobody uses it. And as soon as somebody logs in via SSH it will be started and the moment he or she disconnects all its resources are freed again. Let's find out how to make SSH socket-activatable in systemd taking advantage of the provided inetd compatibility!
+\\
+\\
+Here's the configuration line used to hook up SSH with classic inetd:
+\begin{lstlisting}
+ssh stream tcp nowait root /usr/sbin/sshd sshd -i
+\end{lstlisting}
+And the same as xinetd configuration fragment:
+\begin{lstlisting}
+service ssh {
+        socket_type = stream
+        protocol = tcp
+        wait = no
+        user = root
+        server = /usr/sbin/sshd
+        server_args = -i
+}
+\end{lstlisting}
+Most of this should be fairly easy to understand, as these two fragments express very much the same information. The non-obvious parts: the port number (22) is not configured in inetd configuration, but indirectly via the service database in /etc/services: the service name is used as lookup key in that database and translated to a port number. This indirection via /etc/services has been part of Unix tradition though has been getting more and more out of fashion, and the newer xinetd hence optionally allows configuration with explicit port numbers. The most interesting setting here is the not very intuitively named nowait (resp. wait=no) option. It configures whether a service is of the second (wait) resp. third (nowait) scheme mentioned above. Finally the -i switch is used to enabled inetd mode in SSH.
+\\
+\\
+The systemd translation of these configuration fragments are the following two units. First: sshd.socket is a unit encapsulating information about a socket to listen on:
+\begin{lstlisting}
+[Unit]
+Description=SSH Socket for Per-Connection Servers
+
+[Socket]
+ListenStream=22
+Accept=yes
+
+[Install]
+WantedBy=sockets.target
+\end{lstlisting}
+Most of this should be self-explanatory. A few notes: Accept=yes corresponds to nowait. It's hopefully better named, referring to the fact that for nowait the superserver calls accept() on the listening socket, where for wait this is the job of the executed service process. WantedBy=sockets.target is used to ensure that when enabled this unit is activated at boot at the right time.
+\\
+\\
+And here's the matching service file sshd@.service:
+\begin{lstlisting}
+[Unit]
+Description=SSH Per-Connection Server
+
+[Service]
+ExecStart=-/usr/sbin/sshd -i
+StandardInput=socket
+\end{lstlisting}
+This too should be mostly self-explanatory. Interesting is StandardInput=socket, the option that enables inetd compatibility for this service. StandardInput= may be used to configure what STDIN of the service should be connected for this service (see the man page for details). By setting it to socket we make sure to pass the connection socket here, as expected in the simple inetd interface. Note that we do not need to explicitly configure StandardOutput= here, since by default the setting from StandardInput= is inherited if nothing else is configured. Important is the "-" in front of the binary name. This ensures that the exit status of the per-connection sshd process is forgotten by systemd. Normally, systemd will store the exit status of a all service instances that die abnormally. SSH will sometimes die abnormally with an exit code of 1 or similar, and we want to make sure that this doesn't cause systemd to keep around information for numerous previous connections that died this way (until this information is forgotten with systemctl reset-failed).
+\\
+\\
+sshd@.service is an instantiated service, as described in the preceeding installment of this series. For each incoming connection systemd will instantiate a new instance of sshd@.service, with the instance identifier named after the connection credentials.
+\\
+\\
+You may wonder why in systemd configuration of an inetd service requires two unit files instead of one. The reason for this is that to simplify things we want to make sure that the relation between live units and unit files is obvious, while at the same time we can order the socket unit and the service units independently in the dependency graph and control the units as independently as possible. (Think: this allows you to shutdown the socket independently from the instances, and each instance individually.)
+\\
+\\
+Now, let's see how this works in real life. If we drop these files into /etc/systemd/system we are ready to enable the socket and start it:
+\begin{lstlisting}
+# systemctl enable sshd.socket
+ln -s '/etc/systemd/system/sshd.socket' \
+  '/etc/systemd/system/sockets.target.wants/sshd.socket'
+# systemctl start sshd.socket
+# systemctl status sshd.socket
+sshd.socket - SSH Socket for Per-Connection Servers
+      Loaded: loaded (/etc/systemd/system/sshd.socket; enabled)
+      Active: active (listening) since Mon, 26 Sep 2011 20:24:31 +0200; 14s ago
+    Accepted: 0; Connected: 0
+      CGroup: name=systemd:/system/sshd.socket
+\end{lstlisting}
+This shows that the socket is listening, and so far no connections have been made (Accepted: will show you how many connections have been made in total since the socket was started, Connected: how many connections are currently active.)
+\\
+\\
+Now, let's connect to this from two different hosts, and see which services are now active:
+\begin{lstlisting}
+$ systemctl --full | grep ssh
+sshd@172.31.0.52:22-172.31.0.4:47779.service  loaded active running       
+sshd@172.31.0.52:22-172.31.0.54:52985.service loaded active running       
+sshd.socket                                   loaded active listening     
+\end{lstlisting}
+As expected, there are now two service instances running, for the two connections, and they are named after the source and destination address of the TCP connection as well as the port numbers. (For AF\_UNIX sockets the instance identifier will carry the PID and UID of the connecting client.) This allows us to invidiually introspect or kill specific sshd instances, in case you want to terminate the session of a specific client:
+\begin{lstlisting}
+# systemctl kill sshd@172.31.0.52:22-172.31.0.4:47779.service
+\end{lstlisting}
+And that's probably already most of what you need to know for hooking up inetd services with systemd and how to use them afterwards.
+\\
+\\
+In the case of SSH it is probably a good suggestion for most distributions in order to save resources to default to this kind of inetd-style socket activation, but provide a stand-alone unit file to sshd as well which can be enabled optionally. I'll soon file a wishlist bug about this against our SSH package in Fedora.
+\\
+\\
+A few final notes on how xinetd and systemd compare feature-wise, and whether xinetd is fully obsoleted by systemd. The short answer here is that systemd does not provide the full xinetd feature set and that is does not fully obsolete xinetd. The longer answer is a bit more complex: if you look at the multitude of options xinetd provides you'll notice that systemd does not compare. For example, systemd does not come with built-in echo, time, daytime or discard servers, and never will include those. TCPMUX is not supported, and neither are RPC services. However, you will also find that most of these are either irrelevant on today's Internet or became other way out-of-fashion. The vast majority of inetd services do not directly take advantage of these additional features. In fact, none of the xinetd services shipped on Fedora make use of these options. That said, there are a couple of useful features that systemd does not support, for example IP ACL management. However, most administrators will probably agree that firewalls are the better solution for these kinds of problems and on top of that, systemd supports ACL management via tcpwrap for those who indulge in retro technologies like this. On the other hand systemd also provides numerous features xinetd does not provide, starting with the individual control of instances shown above, or the more expressive configurability of the execution context for the instances. I believe that what systemd provides is quite comprehensive, comes with little legacy cruft but should provide you with everything you need. And if there's something systemd does not cover, xinetd will always be there to fill the void as you can easily run it in conjunction with systemd. For the majority of uses systemd should cover what is necessary, and allows you cut down on the required components to build your system from. In a way, systemd brings back the functionality of classic Unix inetd and turns it again into a center piece of a Linux system.
 \section{references}
 \nocite{*}
 \bibliography{references}
