@@ -1200,6 +1200,69 @@ Of course, if you are writing unit files for your own packages, please consider 
 \\
 \\
 Oh, and BTW: if you are looking for a rough overview of systemd's boot process here's another new man page we recently added, which includes a pretty ASCII flow chart of the boot process and the units involved.
+\section{Watchdogs}
+There are three big target audiences we try to cover with systemd: the embedded/mobile folks, the desktop people and the server folks. While the systems used by embedded/mobile tend to be underpowered and have few resources are available, desktops tend to be much more powerful machines -- but still much less resourceful than servers. Nonetheless there are surprisingly many features that matter to both extremes of this axis (embedded and servers), but not the center (desktops). On of them is support for watchdogs in hardware and software.
+\\
+\\
+Embedded devices frequently rely on watchdog hardware that resets it automatically if software stops responding (more specifically, stops signalling the hardware in fixed intervals that it is still alive). This is required to increase reliability and make sure that regardless what happens the best is attempted to get the system working again. Functionality like this makes little sense on the desktop[1]. However, on high-availability servers watchdogs are frequently used, again.
+\\
+\\
+Starting with version 183 systemd provides full support for hardware watchdogs (as exposed in /dev/watchdog to userspace), as well as supervisor (software) watchdog support for invidual system services. The basic idea is the following: if enabled, systemd will regularly ping the watchdog hardware. If systemd or the kernel hang this ping will not happen anymore and the hardware will automatically reset the system. This way systemd and the kernel are protected from boundless hangs -- by the hardware. To make the chain complete, systemd then exposes a software watchdog interface for individual services so that they can also be restarted (or some other action taken) if they begin to hang. This software watchdog logic can be configured individually for each service in the ping frequency and the action to take. Putting both parts together (i.e. hardware watchdogs supervising systemd and the kernel, as well as systemd supervising all other services) we have a reliable way to watchdog every single component of the system.
+
+To make use of the hardware watchdog it is sufficient to set the RuntimeWatchdogSec= option in /etc/systemd/system.conf. It defaults to 0 (i.e. no hardware watchdog use). Set it to a value like 20s and the watchdog is enabled. After 20s of no keep-alive pings the hardware will reset itself. Note that systemd will send a ping to the hardware at half the specified interval, i.e. every 10s. And that's already all there is to it. By enabling this single, simple option you have turned on supervision by the hardware of systemd and the kernel beneath it.[2]
+\\
+\\
+Note that the hardware watchdog device (/dev/watchdog) is single-user only. That means that you can either enable this functionality in systemd, or use a separate external watchdog daemon, such as the aptly named watchdog.
+\\
+\\
+ShutdownWatchdogSec= is another option that can be configured in /etc/systemd/system.conf. It controls the watchdog interval to use during reboots. It defaults to 10min, and adds extra reliability to the system reboot logic: if a clean reboot is not possible and shutdown hangs, we rely on the watchdog hardware to reset the system abruptly, as extra safety net.
+\\
+\\
+So much about the hardware watchdog logic. These two options are really everything that is necessary to make use of the hardware watchdogs. Now, let's have a look how to add watchdog logic to individual services.
+\\
+\\
+First of all, to make software watchdog-supervisable it needs to be patched to send out "I am alive" signals in regular intervals in its event loop. Patching this is relatively easy. First, a daemon needs to read the WATCHDOG\_USEC= environment variable. If it is set, it will contain the watchdog interval in usec formatted as ASCII text string, as it is configured for the service. The daemon should then issue sd\_notify("WATCHDOG=1") calls every half of that interval. A daemon patched this way should transparently support watchdog functionality by checking whether the environment variable is set and honouring the value it is set to.
+\\
+\\
+To enable the software watchdog logic for a service (which has been patched to support the logic pointed out above) it is sufficient to set the WatchdogSec= to the desired failure latency. See systemd.service(5) for details on this setting. This causes WATCHDOG\_USEC= to be set for the service's processes and will cause the service to enter a failure state as soon as no keep-alive ping is received within the configured interval.
+\\
+\\
+If a service enters a failure state as soon as the watchdog logic detects a hang, then this is hardly sufficient to build a reliable system. The next step is to configure whether the service shall be restarted and how often, and what to do if it then still fails. To enable automatic service restarts on failure set Restart=on-failure for the service. To configure how many times a service shall be attempted to be restarted use the combination of StartLimitBurst= and StartLimitInterval= which allow you to configure how often a service may restart within a time interval. If that limit is reached, a special action can be taken. This action is configured with StartLimitAction=. The default is a none, i.e. that no further action is taken and the service simply remains in the failure state without any further attempted restarts. The other three possible values are reboot, reboot-force and reboot-immediate. reboot attempts a clean reboot, going through the usual, clean shutdown logic. reboot-force is more abrupt: it will not actually try to cleanly shutdown any services, but immediately kills all remaining services and unmounts all file systems and then forcibly reboots (this way all file systems will be clean but reboot will still be very fast). Finally, reboot-immediate does not attempt to kill any process or unmount any file systems. Instead it just hard reboots the machine without delay. reboot-immediate hence comes closest to a reboot triggered by a hardware watchdog. All these settings are documented in systemd.service(5).
+\\
+\\
+Putting this all together we now have pretty flexible options to watchdog-supervise a specific service and configure automatic restarts of the service if it hangs, plus take ultimate action if that doesn't help.
+\\
+\\
+Here's an example unit file:
+\begin{lstlisting}
+[Unit]
+Description=My Little Daemon
+Documentation=man:mylittled(8)
+
+[Service]
+ExecStart=/usr/bin/mylittled
+WatchdogSec=30s
+Restart=on-failure
+StartLimitInterval=5min
+StartLimitBurst=4
+StartLimitAction=reboot-force
+\end{lstlisting}
+This service will automatically be restarted if it hasn't pinged the system manager for longer than 30s or if it fails otherwise. If it is restarted this way more often than 4 times in 5min action is taken and the system quickly rebooted, with all file systems being clean when it comes up again.
+\\
+\\
+And that's already all I wanted to tell you about! With hardware watchdog support right in PID 1, as well as supervisor watchdog support for individual services we should provide everything you need for most watchdog usecases. Regardless if you are building an embedded or mobile applience, or if your are working with high-availability servers, please give this a try!
+\\
+\\
+(Oh, and if you wonder why in heaven PID 1 needs to deal with /dev/watchdog, and why this shouldn't be kept in a separate daemon, then please read this again and try to understand that this is all about the supervisor chain we are building here, where the hardware watchdog supervises systemd, and systemd supervises the individual services. Also, we believe that a service not responding should be treated in a similar way as any other service error. Finally, pinging /dev/watchdog is one of the most trivial operations in the OS (basically little more than a ioctl() call), to the support for this is not more than a handful lines of code. Maintaining this externally with complex IPC between PID 1 (and the daemons) and this watchdog daemon would be drastically more complex, error-prone and resource intensive.)
+\\
+\\
+Note that the built-in hardware watchdog support of systemd does not conflict with other watchdog software by default. systemd does not make use of /dev/watchdog by default, and you are welcome to use external watchdog daemons in conjunction with systemd, if this better suits your needs.
+\\
+\\
+And one last thing: if you wonder whether your hardware has a watchdog, then the answer is: almost definitely yes -- if it is anything more recent than a few years. If you want to verify this, try the wdctl tool from recent util-linux, which shows you everything you need to know about your watchdog hardware.
+\\
+\\
+I'd like to thank the great folks from Pengutronix for contributing most of the watchdog logic. Thank you!
 \section{references}
 \nocite{*}
 \bibliography{references}
