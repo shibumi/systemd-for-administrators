@@ -917,6 +917,159 @@ In the case of SSH it is probably a good suggestion for most distributions in or
 \\
 \\
 A few final notes on how xinetd and systemd compare feature-wise, and whether xinetd is fully obsoleted by systemd. The short answer here is that systemd does not provide the full xinetd feature set and that is does not fully obsolete xinetd. The longer answer is a bit more complex: if you look at the multitude of options xinetd provides you'll notice that systemd does not compare. For example, systemd does not come with built-in echo, time, daytime or discard servers, and never will include those. TCPMUX is not supported, and neither are RPC services. However, you will also find that most of these are either irrelevant on today's Internet or became other way out-of-fashion. The vast majority of inetd services do not directly take advantage of these additional features. In fact, none of the xinetd services shipped on Fedora make use of these options. That said, there are a couple of useful features that systemd does not support, for example IP ACL management. However, most administrators will probably agree that firewalls are the better solution for these kinds of problems and on top of that, systemd supports ACL management via tcpwrap for those who indulge in retro technologies like this. On the other hand systemd also provides numerous features xinetd does not provide, starting with the individual control of instances shown above, or the more expressive configurability of the execution context for the instances. I believe that what systemd provides is quite comprehensive, comes with little legacy cruft but should provide you with everything you need. And if there's something systemd does not cover, xinetd will always be there to fill the void as you can easily run it in conjunction with systemd. For the majority of uses systemd should cover what is necessary, and allows you cut down on the required components to build your system from. In a way, systemd brings back the functionality of classic Unix inetd and turns it again into a center piece of a Linux system.
+\section{Securing Your Services}
+One of the core features of Unix systems is the idea of privilege separation between the different components of the OS. Many system services run under their own user IDs thus limiting what they can do, and hence the impact they may have on the OS in case they get exploited.
+\\
+\\
+This kind of privilege separation only provides very basic protection however, since in general system services run this way can still do at least as much as a normal local users, though not as much as root. For security purposes it is however very interesting to limit even further what services can do, and shut them off a couple of things that normal users are allowed to do.
+\\
+\\
+A great way to limit the impact of services is by employing MAC technologies such as SELinux. If you are interested to secure down your server, running SELinux is a very good idea. systemd enables developers and administrators to apply additional restrictions to local services independently of a MAC. Thus, regardless whether you are able to make use of SELinux you may still enforce certain security limits on your services.
+\\
+\\
+In this iteration of the series we want to focus on a couple of these security features of systemd and how to make use of them in your services. These features take advantage of a couple of Linux-specific technologies that have been available in the kernel for a long time, but never have been exposed in a widely usable fashion. These systemd features have been designed to be as easy to use as possible, in order to make them attractive to administrators and upstream developers:
+\begin{enumerate}
+\item Isolating services from the network
+\item Service-private /tmp
+\item Making directories appear read-only or inaccessible to services
+\item Taking away capabilities from services
+\item Disallowing forking, limiting file creation for services
+\item Controlling device node access of services
+\end{enumerate}
+All options described here are documented in systemd's man pages, notably systemd.exec(5). Please consult these man pages for further details.
+\\
+\\
+All these options are available on all systemd systems, regardless if SELinux or any other MAC is enabled, or not.
+\\
+\\
+All these options are relatively cheap, so if in doubt use them. Even if you might think that your service doesn't write to /tmp and hence enabling PrivateTmp=yes (as described below) might not be necessary, due to today's complex software it's still beneficial to enable this feature, simply because libraries you link to (and plug-ins to those libraries) which you do not control might need temporary files after all. Example: you never know what kind of NSS module your local installation has enabled, and what that NSS module does with /tmp.
+\\
+\\
+These options are hopefully interesting both for administrators to secure their local systems, and for upstream developers to ship their services secure by default. We strongly encourage upstream developers to consider using these options by default in their upstream service units. They are very easy to make use of and have major benefits for security.
+\subsection{Isolating Services from the Network}
+A very simple but powerful configuration option you may use in systemd service definitions is PrivateNetwork=:
+\begin{lstlisting}
+...
+[Service]
+ExecStart=...
+PrivateNetwork=yes
+...
+\end{lstlisting}
+With this simple switch a service and all the processes it consists of are entirely disconnected from any kind of networking. Network interfaces became unavailable to the processes, the only one they'll see is the loopback device "lo", but it is isolated from the real host loopback. This is a very powerful protection from network attacks.
+\\
+\\
+Caveat: Some services require the network to be operational. Of course, nobody would consider using PrivateNetwork=yes on a network-facing service such as Apache. However even for non-network-facing services network support might be necessary and not always obvious. Example: if the local system is configured for an LDAP-based user database doing glibc name lookups with calls such as getpwnam() might end up resulting in network access. That said, even in those cases it is more often than not OK to use PrivateNetwork=yes since user IDs of system service users are required to be resolvable even without any network around. That means as long as the only user IDs your service needs to resolve are below the magic 1000 boundary using PrivateNetwork=yes should be OK.
+\\
+\\
+Internally, this feature makes use of network namespaces of the kernel. If enabled a new network namespace is opened and only the loopback device configured in it.
+\subsection{Service-Private /tmp}
+Another very simple but powerful configuration switch is PrivateTmp=:
+\begin{lstlisting}
+...
+[Service]
+ExecStart=...
+PrivateTmp=yes
+...
+\end{lstlisting}
+If enabled this option will ensure that the /tmp directory the service will see is private and isolated from the host system's /tmp. /tmp traditionally has been a shared space for all local services and users. Over the years it has been a major source of security problems for a multitude of services. Symlink attacks and DoS vulnerabilities due to guessable /tmp temporary files are common. By isolating the service's /tmp from the rest of the host, such vulnerabilities become moot.
+\\
+\\
+For Fedora 17 a feature has been accepted in order to enable this option across a large number of services.
+\\
+\\
+Caveat: Some services actually misuse /tmp as a location for IPC sockets and other communication primitives, even though this is almost always a vulnerability (simply because if you use it for communication you need guessable names, and guessable names make your code vulnerable to DoS and symlink attacks) and /run is the much safer replacement for this, simply because it is not a location writable to unprivileged processes. For example, X11 places it's communication sockets below /tmp (which is actually secure -- though still not ideal -- in this exception since it does so in a safe subdirectory which is created at early boot.) Services which need to communicate via such communication primitives in /tmp are no candidates for PrivateTmp=. Thankfully these days only very few services misusing /tmp like this remain.
+\\
+\\
+Internally, this feature makes use of file system namespaces of the kernel. If enabled a new file system namespace is opened inheritng most of the host hierarchy with the exception of /tmp.
+\subsection{Making Directories Appear Read-Only or Inaccessible to Services}
+With the ReadOnlyDirectories= and InaccessibleDirectories= options it is possible to make the specified directories inaccessible for writing resp. both reading and writing to the service:
+\begin{lstlisting}
+...
+[Service]
+ExecStart=...
+InaccessibleDirectories=/home
+ReadOnlyDirectories=/var
+...
+
+\end{lstlisting}
+With these two configuration lines the whole tree below /home becomes inaccessible to the service (i.e. the directory will appear empty and with 000 access mode), and the tree below /var becomes read-only.
+\\
+\\
+Caveat: Note that ReadOnlyDirectories= currently is not recursively applied to submounts of the specified directories (i.e. mounts below /var in the example above stay writable). This is likely to get fixed soon.
+\\
+\\
+Internally, this is also implemented based on file system namspaces.
+\subsection{Taking Away Capabilities From Services}
+Another very powerful security option in systemd is CapabilityBoundingSet= which allows to limit in a relatively fine grained fashion which kernel capabilities a service started retains:
+\begin{lstlisting}
+...
+[Service]
+ExecStart=...
+CapabilityBoundingSet=CAP_CHOWN CAP_KILL
+...
+\end{lstlisting}
+In the example above only the CAP\_CHOWN and CAP\_KILL capabilities are retained by the service, and the service and any processes it might create have no chance to ever acquire any other capabilities again, not even via setuid binaries. The list of currently defined capabilities is available in capabilities(7). Unfortunately some of the defined capabilities are overly generic (such as CAP\_SYS\_ADMIN), however they are still a very useful tool, in particular for services that otherwise run with full root privileges.
+\\
+\\
+To identify precisely which capabilities are necessary for a service to run cleanly is not always easy and requires a bit of testing. To simplify this process a bit, it is possible to blacklist certain capabilities that are definitely not needed instead of whitelisting all that might be needed. Example: the CAP\_SYS\_PTRACE is a particularly powerful and security relevant capability needed for the implementation of debuggers, since it allows introspecting and manipulating any local process on the system. A service like Apache obviously has no business in being a debugger for other processes, hence it is safe to remove the capability from it:
+\begin{lstlisting}
+...
+[Service]
+ExecStart=...
+CapabilityBoundingSet=~CAP_SYS_PTRACE
+...
+\end{lstlisting}
+The ~ character the value assignment here is prefixed with inverts the meaning of the option: instead of listing all capabalities the service will retain you may list the ones it will not retain.
+\\
+\\
+Caveat: Some services might react confused if certain capabilities are made unavailable to them. Thus when determining the right set of capabilities to keep around you need to do this carefully, and it might be a good idea to talk to the upstream maintainers since they should know best which operations a service might need to run successfully.
+\\
+\\
+Caveat 2: Capabilities are not a magic wand. You probably want to combine them and use them in conjunction with other security options in order to make them truly useful.
+\\
+\\
+To easily check which processes on your system retain which capabilities use the pscap tool from the libcap-ng-utils package.
+\\
+\\
+Making use of systemd's CapabilityBoundingSet= option is often a simple, discoverable and cheap replacement for patching all system daemons individually to control the capability bounding set on their own.
+\subsection{Disallowing Forking, Limiting File Creation for Services}
+Resource Limits may be used to apply certain security limits on services being run. Primarily, resource limits are useful for resource control (as the name suggests...) not so much access control. However, two of them can be useful to disable certain OS features: RLIMIT_NPROC and RLIMIT_FSIZE may be used to disable forking and disable writing of any files with a size > 0:
+\begin{lstlisting}
+...
+[Service]
+ExecStart=...
+LimitNPROC=1
+LimitFSIZE=0
+...
+\end{lstlisting}
+Note that this will work only if the service in question drops privileges and runs under a (non-root) user ID of its own or drops the CAP_SYS_RESOURCE capability, for example via CapabilityBoundingSet= as discussed above. Without that a process could simply increase the resource limit again thus voiding any effect.
+\\
+\\
+Caveat: LimitFSIZE= is pretty brutal. If the service attempts to write a file with a size > 0, it will immeidately be killed with the SIGXFSZ which unless caught terminates the process. Also, creating files with size 0 is still allowed, even if this option is used.
+\\
+\\
+For more information on these and other resource limits, see setrlimit(2).
+\subsection{Controlling Device Node Access of Services}
+Devices nodes are an important interface to the kernel and its drivers. Since drivers tend to get much less testing and security checking than the core kernel they often are a major entry point for security hacks. systemd allows you to control access to devices individually for each service:
+\begin{lstlisting}
+...
+[Service]
+ExecStart=...
+DeviceAllow=/dev/null rw
+...
+\end{lstlisting}
+This will limit access to /dev/null and only this device node, disallowing access to any other device nodes.
+\\
+\\
+The feature is implemented on top of the devices cgroup controller.
+\subsection{Other Options}
+Besides the easy to use options above there are a number of other security relevant options available. However they usually require a bit of preparation in the service itself and hence are probably primarily useful for upstream developers. These options are RootDirectory= (to set up chroot() environments for a service) as well as User= and Group= to drop privileges to the specified user and group. These options are particularly useful to greatly simplify writing daemons, where all the complexities of securely dropping privileges can be left to systemd, and kept out of the daemons themselves.
+\\
+\\
+If you are wondering why these options are not enabled by default: some of them simply break seamntics of traditional Unix, and to maintain compatibility we cannot enable them by default. e.g. since traditional Unix enforced that /tmp was a shared namespace, and processes could use it for IPC we cannot just go and turn that off globally, just because /tmp's role in IPC is now replaced by /run.
+\\
+\\
+And that's it for now. If you are working on unit files for upstream or in your distribution, please consider using one or more of the options listed above. If you service is secure by default by taking advantage of these options this will help not only your users but also make the Internet a safer place.
 \section{references}
 \nocite{*}
 \bibliography{references}
