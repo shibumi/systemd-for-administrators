@@ -1319,6 +1319,179 @@ This creates a unit file that is specific to serial port ttyS2, so that you can 
 \\
 \\
 And this is pretty much all there's to say about serial ports, VTs and login prompts on them. I hope this was interesting, and please come back soon for the next installment of this series!
+\section{Using the Journal}
+If you are wondering what the journal is, here's an explanation in a few words to get you up to speed: the journal is a component of systemd, that captures Syslog messages, Kernel log messages, initial RAM disk and early boot messages as well as messages written to STDOUT/STDERR of all services, indexes them and makes this available to the user. It can be used in parallel, or in place of a traditional syslog daemon, such as rsyslog or syslog-ng. For more information, see the initial announcement.
+\\
+\\
+The journal has been part of Fedora since F17. With Fedora 18 it now has grown into a reliable, powerful tool to handle your logs. Note however, that on F17 and F18 the journal is configured by default to store logs only in a small ring-buffer in /run/log/journal, i.e. not persistent. This of course limits its usefulness quite drastically but is sufficient to show a bit of recent log history in systemctl status. For Fedora 19, we plan to change this, and enable persistent logging by default. Then, journal files will be stored in /var/log/journal and can grow much larger, thus making the journal a lot more useful.
+\subsection{Enabling Persistency}
+In the meantime, on F17 or F18, you can enable journald's persistent storage manually:
+\begin{lstlisting}
+# mkdir -p /var/log/journal
+\end{lstlisting}
+After that, it's a good idea to reboot, to get some useful structured data into your journal to play with. Oh, and since you have the journal now, you don't need syslog anymore (unless having /var/log/messages as text file is a necessity for you.), so you can choose to deinstall rsyslog:
+\begin{lstlisting}
+# yum remove rsyslog
+\end{lstlisting}
+\subsection{Basics}
+Now we are ready to go. The following text shows a lot of features of systemd 195 as it will be included in Fedora 18[1], so if your F17 can't do the tricks you see, please wait for F18. First, let's start with some basics. To access the logs of the journal use the journalctl(1) tool. To have a first look at the logs, just type in:
+\begin{lstlisting}
+# journalctl
+\end{lstlisting}
+If you run this as root you will see all logs generated on the system, from system components the same way as for logged in users. The output you will get looks like a pixel-perfect copy of the traditional /var/log/messages format, but actually has a couple of improvements over it:
+\begin{itemize}
+\item Lines of error priority (and higher) will be highlighted red.
+\item Lines of notice/warning priority will be highlighted bold.
+\item The timestamps are converted into your local time-zone.
+\item The output is auto-paged with your pager of choice (defaults to less).
+\item This will show all available data, including rotated logs.
+\item Between the output of each boot we'll add a line clarifying that a new boot begins now.
+\end{itemize}
+Note that in this blog story I will not actually show you any of the output this generates, I cut that out for brevity -- and to give you a reason to try it out yourself with a current image for F18's development version with systemd 195. But I do hope you get the idea anyway.
+\subsection{Access Control}
+Browsing logs this way is already pretty nice. But requiring to be root sucks of course, even administrators tend to do most of their work as unprivileged users these days. By default, Journal users can only watch their own logs, unless they are root or in the adm group. To make watching system logs more fun, let's add ourselves to adm:
+\begin{lstlisting}
+# usermod -a -G adm lennart
+\end{lstlisting}
+After logging out and back in as lennart I know have access to the full journal of the system and all users:
+\begin{lstlisting}
+$ journalctl
+\end{lstlisting}
+\subsection{Live View}
+If invoked without parameters journalctl will show me the current log database. Sometimes one needs to watch logs as they grow, where one previously used tail -f /var/log/messages:
+\begin{lstlisting}
+$ journalctl -f
+\end{lstlisting}
+Yes, this does exactly what you expect it to do: it will show you the last ten logs lines and then wait for changes and show them as they take place.
+\subsection{Basic Filtering}
+When invoking journalctl without parameters you'll see the whole set of logs, beginning with the oldest message stored. That of course, can be a lot of data. Much more useful is just viewing the logs of the current boot:
+\begin{lstlisting}
+$ journalctl -b
+\end{lstlisting}
+This will show you only the logs of the current boot, with all the aforementioned gimmicks mentioned. But sometimes even this is way too much data to process. So what about just listing all the real issues to care about: all messages of priority levels ERROR and worse, from the current boot:
+\begin{lstlisting}
+$ journalctl -b -p err
+\end{lstlisting}
+If you reboot only seldom the -b makes little sense, filtering based on time is much more useful:
+\begin{lstlisting}
+$ journalctl --since=yesterday
+\end{lstlisting}
+And there you go, all log messages from the day before at 00:00 in the morning until right now. Awesome! Of course, we can combine this with -p err or a similar match. But humm, we are looking for something that happened on the 15th of October, or was it the 16th?
+\begin{lstlisting}
+$ journalctl --since=2012-10-15 --until="2011-10-16 23:59:59"
+\end{lstlisting}
+Yupp, there we go, we found what we were looking for. But humm, I noticed that some CGI script in Apache was acting up earlier today, let's see what Apache logged at that time:
+\begin{lstlisting}
+$ journalctl -u httpd --since=00:00 --until=9:30
+\end{lstlisting}
+Oh, yeah, there we found it. But hey, wasn't there an issue with that disk /dev/sdc? Let's figure out what was going on there:
+\begin{lstlisting}
+$ journalctl /dev/sdc
+\end{lstlisting}
+OMG, a disk error![2] Hmm, let's quickly replace the disk before we lose data. Done! Next! -- Hmm, didn't I see that the vpnc binary made a booboo? Let's check for that:
+\begin{lstlisting}
+$ journalctl /usr/sbin/vpnc
+\end{lstlisting}
+Hmm, I don't get this, this seems to be some weird interaction with dhclient, let's see both outputs, interleaved:
+\begin{lstlisting}
+$ journalctl /usr/sbin/vpnc /usr/sbin/dhclient
+\end{lstlisting}
+That did it! Found it!
+\subsection{Advanced Filtering}
+Whew! That was awesome already, but let's turn this up a notch. Internally systemd stores each log entry with a set of implicit meta data. This meta data looks a lot like an environment block, but actually is a bit more powerful: values can take binary, large values (though this is the exception, and usually they just contain UTF-8), and fields can have multiple values assigned (an exception too, usually they only have one value). This implicit meta data is collected for each and every log message, without user intervention. The data will be there, and wait to be used by you. Let's see how this looks:
+\begin{lstlisting}
+$ journalctl -o verbose -n
+[...]
+Tue, 2012-10-23 23:51:38 CEST 
+[s=ac9e9c423355411d87bf0ba1a9b424e8;i=4301;
+b=5335e9cf5d954633bb99aefc0ec38c25;m=882ee28d2;
+t=4ccc0f98326e6;x=f21e8b1b0994d7ee]
+        PRIORITY=6
+        SYSLOG_FACILITY=3
+        _MACHINE_ID=a91663387a90b89f185d4e860000001a
+        _HOSTNAME=epsilon
+        _TRANSPORT=syslog
+        SYSLOG_IDENTIFIER=avahi-daemon
+        _COMM=avahi-daemon
+        _EXE=/usr/sbin/avahi-daemon
+        _SYSTEMD_CGROUP=/system/avahi-daemon.service
+        _SYSTEMD_UNIT=avahi-daemon.service
+        _SELINUX_CONTEXT=system_u:system_r:avahi_t:s0
+        _UID=70
+        _GID=70
+        _CMDLINE=avahi-daemon: registering [epsilon.local]
+        MESSAGE=Joining mDNS multicast group on interface 
+            wlan0.IPv4 with address 172.31.0.53.
+        _BOOT_ID=5335e9cf5d954633bb99aefc0ec38c25
+        _PID=27937
+        SYSLOG_PID=27937
+        _SOURCE_REALTIME_TIMESTAMP=1351029098747042
+\end{lstlisting}
+(I cut out a lot of noise here, I don't want to make this story overly long. -n without parameter shows you the last 10 log entries, but I cut out all but the last.)
+\\
+\\
+With the -o verbose switch we enabled verbose output. Instead of showing a pixel-perfect copy of classic /var/log/messages that only includes a minimimal subset of what is available we now see all the gory details the journal has about each entry. But it's highly interesting: there is user credential information, SELinux bits, machine information and more. For a full list of common, well-known fields, see the man page.
+\\
+\\
+Now, as it turns out the journal database is indexed by all of these fields, out-of-the-box! Let's try this out:
+\begin{lstlisting}
+$ journalctl _UID=70
+\end{lstlisting}
+And there you go, this will show all log messages logged from Linux user ID 70. As it turns out one can easily combine these matches:
+\begin{lstlisting}
+$ journalctl _UID=70 _UID=71
+\end{lstlisting}
+Specifying two matches for the same field will result in a logical OR combination of the matches. All entries matching either will be shown, i.e. all messages from either UID 70 or 71.
+\begin{lstlisting}
+$ journalctl _HOSTNAME=epsilon _COMM=avahi-daemon
+\end{lstlisting}
+You guessed it, if you specify two matches for different field names, they will be combined with a logical AND. All entries matching both will be shown now, meaning that all messages from processes named avahi-daemon and host epsilon.
+\\
+\\
+But of course, that's not fancy enough for us. We are computer nerds after all, we live off logical expressions. We must go deeper!
+\begin{lstlisting}
+$ journalctl _HOSTNAME=theta _UID=70 + _HOSTNAME=epsilon _COMM=avahi-daemon
+\end{lstlisting}
+The + is an explicit OR you can use in addition to the implied OR when you match the same field twice. The line above hence means: show me everything from host theta with UID 70, or of host epsilon with a process name of avahi-daemon.
+\subsection{And now, it becomes magic!}
+That was already pretty cool, right? Righ! But heck, who can remember all those values a field can take in the journal, I mean, seriously, who has thaaaat kind of photographic memory? Well, the journal has:
+\begin{lstlisting}
+$ journalctl -F _SYSTEMD_UNIT
+\end{lstlisting}
+This will show us all values the field _SYSTEMD_UNIT takes in the database, or in other words: the names of all systemd services which ever logged into the journal. This makes it super-easy to build nice matches. But wait, turns out this all is actually hooked up with shell completion on bash! This gets even more awesome: as you type your match expression you will get a list of well-known field names, and of the values they can take! Let's figure out how to filter for SELinux labels again. We remember the field name was something with SELINUX in it, let's try that:
+\begin{lstlisting}
+$ journalctl _SE<TAB>
+\end{lstlisting}
+And yupp, it's immediately completed:
+\begin{lstlisting}
+$ journalctl _SELINUX_CONTEXT=
+\end{lstlisting}
+Cool, but what's the label again we wanted to match for?
+\begin{lstlisting}
+$ journalctl _SELINUX_CONTEXT=<TAB><TAB>
+kernel                                       stem_u:system_r:local_logi..
+system_u:system_r:accountsd_t:s0             system_u:system_r:lvm_t:s0..
+system_u:system_r:avahi_t:s0                 system_u:system_r:modemman..
+system_u:system_r:bluetooth_t:s0             system_u:system_r:NetworkM..
+system_u:system_r:chkpwd_t:s0-s0:c0.c1023    system_u:system_r:policyki..
+system_u:system_r:chronyd_t:s0               system_u:system_r:rtkit_da..
+system_u:system_r:crond_t:s0-s0:c0.c1023     system_u:system_r:syslogd_..
+system_u:system_r:devicekit_disk_t:s0        system_u:system_r:system_c..
+system_u:system_r:dhcpc_t:s0                 system_u:system_r:system_d..
+system_u:system_r:dnsmasq_t:s0-s0:c0.c1023   system_u:system_r:systemd_..
+system_u:system_r:init_t:s0                  system_u:system_r:systemd_..
+\end{lstlisting}
+Ah! Right! We wanted to see everything logged under PolicyKit's security label:
+\begin{lstlisting}
+$ journalctl _SELINUX_CONTEXT=system_u:system_r:policykit_t:s0
+\end{lstlisting}
+Wow! That was easy! I didn't know anything related to SELinux could be thaaat easy! ;-) Of course this kind of completion works with any field, not just SELinux labels.
+\\
+\\
+So much for now. There's a lot more cool stuff in journalctl(1) than this. For example, it generates JSON output for you! You can match against kernel fields! You can get simple /var/log/messages-like output but with relative timestamps! And so much more!
+\\
+\\
+Anyway, in the next weeks I hope to post more stories about all the cool things the journal can do for you. This is just the beginning, stay tuned.
 \section{references}
 \nocite{*}
 \bibliography{references}
