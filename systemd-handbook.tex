@@ -1458,7 +1458,7 @@ That was already pretty cool, right? Righ! But heck, who can remember all those 
 \begin{lstlisting}
 $ journalctl -F _SYSTEMD_UNIT
 \end{lstlisting}
-This will show us all values the field _SYSTEMD_UNIT takes in the database, or in other words: the names of all systemd services which ever logged into the journal. This makes it super-easy to build nice matches. But wait, turns out this all is actually hooked up with shell completion on bash! This gets even more awesome: as you type your match expression you will get a list of well-known field names, and of the values they can take! Let's figure out how to filter for SELinux labels again. We remember the field name was something with SELINUX in it, let's try that:
+This will show us all values the field \_SYSTEMD\_UNIT takes in the database, or in other words: the names of all systemd services which ever logged into the journal. This makes it super-easy to build nice matches. But wait, turns out this all is actually hooked up with shell completion on bash! This gets even more awesome: as you type your match expression you will get a list of well-known field names, and of the values they can take! Let's figure out how to filter for SELinux labels again. We remember the field name was something with SELINUX in it, let's try that:
 \begin{lstlisting}
 $ journalctl _SE<TAB>
 \end{lstlisting}
@@ -1489,9 +1489,66 @@ Wow! That was easy! I didn't know anything related to SELinux could be thaaat ea
 \\
 \\
 So much for now. There's a lot more cool stuff in journalctl(1) than this. For example, it generates JSON output for you! You can match against kernel fields! You can get simple /var/log/messages-like output but with relative timestamps! And so much more!
+\section{Detecting Virtualization}
+When we started working on systemd we had a closer look on what the various existing init scripts used on Linux where actually doing. Among other things we noticed that a number of them where checking explicitly whether they were running in a virtualized environment (i.e. in a kvm, VMWare, LXC guest or suchlike) or not. Some init scripts disabled themselves in such cases[1], others enabled themselves only in such cases[2]. Frequently, it would probably have been a better idea to check for other conditions rather than explicitly checking for virtualization, but after looking at this from all sides we came to the conclusion that in many cases explicitly conditionalizing services based on detected virtualization is a valid thing to do. As a result we added a new configuration option to systemd that can be used to conditionalize services this way: ConditionVirtualization; we also added a small tool that can be used in shell scripts to detect virtualization: systemd-detect-virt(1); and finally, we added a minimal bus interface to query this from other applications.
 \\
 \\
-Anyway, in the next weeks I hope to post more stories about all the cool things the journal can do for you. This is just the beginning, stay tuned.
+Detecting whether your code is run inside a virtualized environment is actually not that hard. Depending on what precisely you want to detect it's little more than running the CPUID instruction and maybe checking a few files in /sys and /proc. The complexity is mostly about knowing the strings to look for, and keeping this list up-to-date. Currently, the the virtualization detection code in systemd can detect the following virtualization systems:
+\begin{itemize}
+    \item Hardware virtualization (i.e. VMs):
+    \begin{itemize}
+        \item qemu
+        \item kvm
+        \item vmware
+        \item microsoft
+        \item oracle
+        \item xen
+        \item bochs
+    \end{itemize}
+    \item Same-Kernel virtualization (i.e containers):
+    \begin{itemize}
+        \item chroot
+        \item openvz
+        \item lxc
+        \item lxc-libvirt
+        \item systemd-nspawn
+    \end{itemize}
+\end{itemize}
+Let's have a look how one may make use if this functionality.
+\subsection{Conditionalizing Units}
+Adding ConditionVirtualization to the [Unit] section of a unit file is enough to conditionalize it depending on which virtualization is used or whether one is used at all. Here's an example:
+\begin{lstlisting}
+[Unit]
+Name=My Foobar Service (runs only only on guests)
+ConditionVirtualization=yes
+
+[Service]
+ExecStart=/usr/bin/foobard
+\end{lstlisting}
+Instead of specifiying "yes" or "no" it is possible to specify the ID of a specific virtualization solution (Example: "kvm", "vmware", ...), or either "container" or "vm" to check whether the kernel is virtualized or the hardware. Also, checks can be prefixed with an exclamation mark ("!") to invert a check. For further details see the manual page.
+\subsection{In Shell Scripts}
+In shell scripts it is easy to check for virtualized systems with the systemd-detect-virt(1) tool. Here's an example:
+\begin{lstlisting}
+if systemd-detect-virt -q ; then
+        echo "Virtualization is used:" `systemd-detect-virt`
+else
+        echo "No virtualization is used."
+fi
+\end{lstlisting}
+If this tool is run it will return with an exit code of zero (success) if a virtualization solution has been found, non-zero otherwise. It will also print a short identifier of the used virtualization solution, which can be suppressed with -q. Also, with the -c and -v parameters it is possible to detect only kernel or only hardware virtualization environments. For further details see the manual page.
+\subsection{In Programs}
+Whether virtualization is available is also exported on the system bus:
+\begin{lstlisting}
+$ gdbus call --system --dest org.freedesktop.systemd1 \
+--object-path /org/freedesktop/systemd1 \ 
+--method org.freedesktop.DBus.Properties.Get \ 
+org.freedesktop.systemd1.Manager Virtualization
+(<'systemd-nspawn'>,)
+\end{lstlisting}
+This property contains the empty string if no virtualization is detected. Note that some container environments cannot be detected directly from unprivileged code. That's why we expose this property on the bus rather than providing a library -- the bus implicitly solves the privilege problem quite nicely.
+\\
+\\
+Note that all of this will only ever detect and return information about the "inner-most" virtualization solution. If you stack virtualization ("We must go deeper!") then these interfaces will expose the one the code is most directly interfacing with. Specifically that means that if a container solution is used inside of a VM, then only the container is generally detected and returned.
 \section{references}
 \nocite{*}
 \bibliography{references}
