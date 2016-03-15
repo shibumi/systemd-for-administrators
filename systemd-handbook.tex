@@ -1549,6 +1549,99 @@ This property contains the empty string if no virtualization is detected. Note t
 \\
 \\
 Note that all of this will only ever detect and return information about the "inner-most" virtualization solution. If you stack virtualization ("We must go deeper!") then these interfaces will expose the one the code is most directly interfacing with. Specifically that means that if a container solution is used inside of a VM, then only the container is generally detected and returned.
+\section{Socket Activated Internet Services and OS Containers}
+Socket Activation is an important feature of systemd. When we first announced systemd we already tried to make the point how great socket activation is for increasing parallelization and robustness of socket services, but also for simplifying the dependency logic of the boot. In this episode I'd like to explain why socket activation is an important tool for drastically improving how many services and even containers you can run on a single system with the same resource usage. Or in other words, how you can drive up the density of customer sites on a system while spending less on new hardware.
+\subsection{Socket Activated Internet Services}
+First, let's take a step back. What was socket activation again? -- Basically, socket activation simply means that systemd sets up listening sockets (IP or otherwise) on behalf of your services (without these running yet), and then starts (activates) the services as soon as the first connection comes in. Depending on the technology the services might idle for a while after having processed the connection and possible follow-up connections before they exit on their own, so that systemd will again listen on the sockets and activate the services again the next time they are connected to. For the client it is not visible whether the service it is interested in is currently running or not. The service's IP socket stays continously connectable, no connection attempt ever fails, and all connects will be processed promptly.
+\\
+\\
+A setup like this lowers resource usage: as services are only running when needed they only consume resources when required. Many internet sites and services can benefit from that. For example, web site hosters will have noticed that of the multitude of web sites that are on the Internet only a tiny fraction gets a continous stream of requests: the huge majority of web sites still needs to be available all the time but gets requests only very unfrequently. With a scheme like socket activation you take benefit of this. By hosting many of these sites on a single system like this and only activating their services as necessary allows a large degree of over-commit: you can run more sites on your system than the available resources actually allow. Of course, one shouldn't over-commit too much to avoid contention during peak times.
+\\
+\\
+Socket activation like this is easy to use in systemd. Many modern Internet daemons already support socket activation out of the box (and for those which don't yet it's not hard to add). Together with systemd's instantiated units support it is easy to write a pair of service and socket templates that then may be instantiated multiple times, once for each site. Then, (optionally) make use of some of the security features of systemd to nicely isolate the customer's site's services from each other (think: each customer's service should only see the home directory of the customer, everybody else's directories should be invisible), and there you go: you now have a highly scalable and reliable server system, that serves a maximum of securely sandboxed services at a minimum of resources, and all nicely done with built-in technology of your OS.
+\\
+\\
+This kind of setup is already in production use in a number of companies. For example, the great folks at Pantheon are running their scalable instant Drupal system on a setup that is similar to this. (In fact, Pantheon's David Strauss pioneered this scheme. David, you rock!)
+\subsection{Socket Activated OS Containers}
+All of the above can already be done with older versions of systemd. If you use a distribution that is based on systemd, you can right-away set up a system like the one explained above. But let's take this one step further. With systemd 197 (to be included in Fedora 19), we added support for socket activating not only individual services, but entire OS containers. And I really have to say it at this point: this is stuff I am really excited about. ;-)
+\\
+\\
+Basically, with socket activated OS containers, the host's systemd instance will listen on a number of ports on behalf of a container, for example one for SSH, one for web and one for the database, and as soon as the first connection comes in, it will spawn the container this is intended for, and pass to it all three sockets. Inside of the container, another systemd is running and will accept the sockets and then distribute them further, to the services running inside the container using normal socket activation. The SSH, web and database services will only see the inside of the container, even though they have been activated by sockets that were originally created on the host! Again, to the clients this all is not visible. That an entire OS container is spawned, triggered by simple network connection is entirely transparent to the client side.[1]
+\\
+\\
+The OS containers may contain (as the name suggests) a full operating system, that might even be a different distribution than is running on the host. For example, you could run your host on Fedora, but run a number of Debian containers inside of it. The OS containers will have their own systemd init system, their own SSH instances, their own process tree, and so on, but will share a number of other facilities (such as memory management) with the host.
+\\
+\\
+For now, only systemd's own trivial container manager, systemd-nspawn has been updated to support this kind of socket activation. We hope that libvirt-lxc will soon gain similar functionality. At this point, let's see in more detail how such a setup is configured in systemd using nspawn:
+\\
+\\
+First, please use a tool such as debootstrap or yum's --installroot to set up a container OS tree[2]. The details of that are a bit out-of-focus for this story, there's plenty of documentation around how to do this. Of course, make sure you have systemd v197 installed inside the container. For accessing the container from the command line, consider using systemd-nspawn itself. After you configured everything properly, try to boot it up from the command line with systemd-nspawn's -b switch.
+\\
+\\
+Assuming you now have a working container that boots up fine, let's write a service file for it, to turn the container into a systemd service on the host you can start and stop. Let's create /etc/systemd/system/mycontainer.service on the host:
+\begin{lstlisting}
+[Unit]
+Description=My little container
+
+[Service]
+ExecStart=/usr/bin/systemd-nspawn -jbD /srv/mycontainer 3
+KillMode=process
+\end{lstlisting}
+This service can already be started and stopped via systemctl start and systemctl stop. However, there's no nice way to actually get a shell prompt inside the container. So let's add SSH to it, and even more: let's configure SSH so that a connection to the container's SSH port will socket-activate the entire container. First, let's begin with telling the host that it shall now listen on the SSH port of the container. Let's create /etc/systemd/system/mycontainer.socket on the host:
+\begin{lstlisting}
+[Unit]
+Description=The SSH socket of my little container
+
+[Socket]
+ListenStream=23
+\end{lstlisting}
+If we start this unit with systemctl start on the host then it will listen on port 23, and as soon as a connection comes in it will activate our container service we defined above. We pick port 23 here, instead of the usual 22, as our host's SSH is already listening on that. nspawn virtualizes the process list and the file system tree, but does not actually virtualize the network stack, hence we just pick different ports for the host and the various containers here.
+\\
+\\
+Of course, the system inside the container doesn't yet know what to do with the socket it gets passed due to socket activation. If you'd now try to connect to the port, the container would start-up but the incoming connection would be immediately closed since the container can't handle it yet. Let's fix that!
+\\
+\\
+All that's necessary for that is teach SSH inside the container socket activation. For that let's simply write a pair of socket and service units for SSH. Let's create /etc/systemd/system/sshd.socket in the container:
+\begin{lstlisting}
+[Unit]
+Description=SSH Socket for Per-Connection Servers
+
+[Socket]
+ListenStream=23
+Accept=yes
+\end{lstlisting}
+Then, let's add the matching SSH service file /etc/systemd/system/sshd@.service in the container:
+\begin{lstlisting}
+[Unit]
+Description=SSH Per-Connection Server for %I
+
+[Service]
+ExecStart=-/usr/sbin/sshd -i
+StandardInput=socket
+\end{lstlisting}
+Then, make sure to hook sshd.socket into the sockets.target so that unit is started automatically when the container boots up:
+\begin{lstlisting}
+ln -s /etc/systemd/system/sshd.socket /etc/systemd/system/sockets.target.wants/
+\end{lstlisting}
+And that's it. If we now activate mycontainer.socket on the host, the host's systemd will bind the socket and we can connect to it. If we do this, the host's systemd will activate the container, and pass the socket in to it. The container's systemd will then take the socket, match it up with sshd.socket inside the container. As there's still our incoming connection queued on it, it will then immediately trigger an instance of sshd@.service, and we'll have our login.
+\\
+\\
+And that's already everything there is to it. You can easily add additional sockets to listen on to mycontainer.socket. Everything listed therein will be passed to the container on activation, and will be matched up as good as possible with all socket units configured inside the container. Sockets that cannot be matched up will be closed, and sockets that aren't passed in but are configured for listening will be bound be the container's systemd instance.
+\\
+\\
+So, let's take a step back again. What did we gain through all of this? Well, basically, we can now offer a number of full OS containers on a single host, and the containers can offer their services without running continously. The density of OS containers on the host can hence be increased drastically.
+\\
+\\
+Of course, this only works for kernel-based virtualization, not for hardware virtualization. i.e. something like this can only be implemented on systems such as libvirt-lxc or nspawn, but not in qemu/kvm.
+\\
+\\
+If you have a number of containers set up like this, here's one cool thing the journal allows you to do. If you pass -m to journalctl on the host, it will automatically discover the journals of all local containers and interleave them on display. Nifty, eh?
+\\
+\\
+With systemd 197 you have everything to set up your own socket activated OS containers on-board. However, there are a couple of improvements we're likely to add soon: for example, right now even if all services inside the container exit on idle, the container still will stay around, and we really should make it exit on idle too, if all its services exited and no logins are around. As it turns out we already have much of the infrastructure for this around: we can reuse the auto-suspend functionality we added for laptops: detecting when a laptop is idle and suspending it then is a very similar problem to detecting when a container is idle and shutting it down then.
+\\
+\\
+Anyway, this blog story is already way too long. I hope I haven't lost you half-way already with all this talk of virtualization, sockets, services, different OSes and stuff. I hope this blog story is a good starting point for setting up powerful highly scalable server systems. If you want to know more, consult the documentation and drop by our IRC channel. Thank you!
 \section{references}
 \nocite{*}
 \bibliography{references}
