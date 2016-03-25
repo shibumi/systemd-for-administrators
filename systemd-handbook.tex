@@ -1642,6 +1642,347 @@ With systemd 197 you have everything to set up your own socket activated OS cont
 \\
 \\
 Anyway, this blog story is already way too long. I hope I haven't lost you half-way already with all this talk of virtualization, sockets, services, different OSes and stuff. I hope this blog story is a good starting point for setting up powerful highly scalable server systems. If you want to know more, consult the documentation and drop by our IRC channel. Thank you!
+\section{Container Integration}
+Since a while containers have been one of the hot topics on Linux. Container
+managers such as libvirt-lxc, LXC or Docker are widely known and used these
+days. In this blog story I want to shed some light on systemd's integration
+points with container managers, to allow seamless management of services
+across container boundaries.
+\\
+\\
+We'll focus on OS containers here, i.e. the case where an init system runs
+inside the container, and the container hence in most ways appears like an
+independent system of its own. Much of what I describe here is available on
+pretty much any container manager that implements the logic described here,
+including libvirt-lxc. However, to make things easy we'll focus on
+systemd-nspawn, the mini-container manager that is shipped with systemd
+itself. systemd-nspawn uses the same kernel interfaces as the other
+container managers, however is less flexible as it is designed to be a
+container manager that is as simple to use as possible and "just works",
+rather than trying to be a generic tool you can configure in every low-level
+detail. We use systemd-nspawn extensively when developing systemd.
+\\
+\\
+Anyway, so let's get started with our run-through. Let's start by creating a
+Fedora container tree in a subdirectory:
+\begin{lstlisting}
+# yum -y --releasever=20 --nogpg --installroot=/srv/mycontainer \ 
+--disablerepo='*' --enablerepo=fedora install systemd passwd yum fedora-release
+\end{lstlisting}
+This downloads a minimal Fedora system and installs it in in /srv/mycontainer. This command line is Fedora-specific, but most distributions provide similar functionality in one way or another. The examples section in the systemd-nspawn(1) man page contains a list of the various command lines for other distribution.
+\\
+\\
+We now have the new container installed, let's set an initial root password:
+\begin{lstlisting}
+# systemd-nspawn -D /srv/mycontainer
+Spawning container mycontainer on /srv/mycontainer
+Press ^] three times within 1s to kill container.
+-bash-4.2# passwd
+Changing password for user root.
+New password:
+Retype new password:
+passwd: all authentication tokens updated successfully.
+-bash-4.2# ^D
+Container mycontainer exited successfully.
+#
+\end{lstlisting}
+We use systemd-nspawn here to get a shell in the container, and then use passwd to set the root password. After that the initial setup is done, hence let's boot it up and log in as root with our new password:
+\begin{lstlisting}
+$ systemd-nspawn -D /srv/mycontainer -b
+Spawning container mycontainer on /srv/mycontainer.
+Press ^] three times within 1s to kill container.
+systemd 208 running in system mode. 
+(+PAM +LIBWRAP +AUDIT +SELINUX +IMA +SYSVINIT 
++LIBCRYPTSETUP +GCRYPT +ACL +XZ)
+Detected virtualization 'systemd-nspawn'.
+
+Welcome to Fedora 20 (Heisenbug)!
+
+[  OK  ] Reached target Remote File Systems.
+[  OK  ] Created slice Root Slice.
+[  OK  ] Created slice User and Session Slice.
+[  OK  ] Created slice System Slice.
+[  OK  ] Created slice system-getty.slice.
+[  OK  ] Reached target Slices.
+[  OK  ] Listening on Delayed Shutdown Socket.
+[  OK  ] Listening on /dev/initctl Compatibility Named Pipe.
+[  OK  ] Listening on Journal Socket.
+         Starting Journal Service...
+[  OK  ] Started Journal Service.
+[  OK  ] Reached target Paths.
+         Mounting Debug File System...
+         Mounting Configuration File System...
+         Mounting FUSE Control File System...
+         Starting Create static device nodes in /dev...
+         Mounting POSIX Message Queue File System...
+         Mounting Huge Pages File System...
+[  OK  ] Reached target Encrypted Volumes.
+[  OK  ] Reached target Swap.
+         Mounting Temporary Directory...
+         Starting Load/Save Random Seed...
+[  OK  ] Mounted Configuration File System.
+[  OK  ] Mounted FUSE Control File System.
+[  OK  ] Mounted Temporary Directory.
+[  OK  ] Mounted POSIX Message Queue File System.
+[  OK  ] Mounted Debug File System.
+[  OK  ] Mounted Huge Pages File System.
+[  OK  ] Started Load/Save Random Seed.
+[  OK  ] Started Create static device nodes in /dev.
+[  OK  ] Reached target Local File Systems (Pre).
+[  OK  ] Reached target Local File Systems.
+         Starting Trigger Flushing of Journal to Persistent Storage...
+         Starting Recreate Volatile Files and Directories...
+[  OK  ] Started Recreate Volatile Files and Directories.
+         Starting Update UTMP about System Reboot/Shutdown...
+[  OK  ] Started Trigger Flushing of Journal to Persistent Storage.
+[  OK  ] Started Update UTMP about System Reboot/Shutdown.
+[  OK  ] Reached target System Initialization.
+[  OK  ] Reached target Timers.
+[  OK  ] Listening on D-Bus System Message Bus Socket.
+[  OK  ] Reached target Sockets.
+[  OK  ] Reached target Basic System.
+         Starting Login Service...
+         Starting Permit User Sessions...
+         Starting D-Bus System Message Bus...
+[  OK  ] Started D-Bus System Message Bus.
+         Starting Cleanup of Temporary Directories...
+[  OK  ] Started Cleanup of Temporary Directories.
+[  OK  ] Started Permit User Sessions.
+         Starting Console Getty...
+[  OK  ] Started Console Getty.
+[  OK  ] Reached target Login Prompts.
+[  OK  ] Started Login Service.
+[  OK  ] Reached target Multi-User System.
+[  OK  ] Reached target Graphical Interface.
+
+Fedora release 20 (Heisenbug)
+Kernel 3.18.0-0.rc4.git0.1.fc22.x86_64 on an x86_64 (console)
+
+mycontainer login: root
+Password:
+-bash-4.2#
+\end{lstlisting}
+Now we have everything ready to play around with the container integration of systemd. Let's have a look at the first tool, machinectl. When run without parameters it shows a list of all locally running containers:
+\begin{lstlisting}
+$ machinectl
+MACHINE                          CONTAINER SERVICE
+mycontainer                      container nspawn
+
+1 machines listed.
+\end{lstlisting}
+The "status" subcommand shows details about the container:
+\begin{lstlisting}
+$ machinectl status mycontainer
+mycontainer:
+       Since: Mi 2014-11-12 16:47:19 CET; 51s ago
+      Leader: 5374 (systemd)
+     Service: nspawn; class container
+        Root: /srv/mycontainer
+     Address: 192.168.178.38
+              10.36.6.162
+              fd00::523f:56ff:fe00:4994
+              fe80::523f:56ff:fe00:4994
+          OS: Fedora 20 (Heisenbug)
+        Unit: machine-mycontainer.scope
+              ├─5374 /usr/lib/systemd/systemd
+              └─system.slice
+                ├─dbus.service
+                │ └─5414 /bin/dbus-daemon --system 
+--address=systemd: --nofork --nopidfile --systemd-act...
+                ├─systemd-journald.service
+                │ └─5383 /usr/lib/systemd/systemd-journald
+                ├─systemd-logind.service
+                │ └─5411 /usr/lib/systemd/systemd-logind
+                └─console-getty.service
+                  └─5416 /sbin/agetty --noclear -s 
+console 115200 38400 9600
+\end{lstlisting}
+With this we see some interesting information about the container, including its control group tree (with processes), IP addresses and root directory.
+\\
+\\
+The "login" subcommand gets us a new login shell in the container:
+\begin{lstlisting}
+# machinectl login mycontainer
+Connected to container mycontainer. 
+Press ^] three times within 1s to exit session.
+
+Fedora release 20 (Heisenbug)
+Kernel 3.18.0-0.rc4.git0.1.fc22.x86_64 on an x86_64 (pts/0)
+
+mycontainer login:
+\end{lstlisting}
+The "reboot" subcommand reboots the container:
+\begin{lstlisting}
+# machinectl reboot mycontainer
+\end{lstlisting}
+The "poweroff" subcommand powers the container off:
+\begin{lstlisting}
+# machinectl poweroff mycontainer
+\end{lstlisting}
+So much about the machinectl tool. The tool knows a couple of more commands, please check the man page for details. Note again that even though we use systemd-nspawn as container manager here the concepts apply to any container manager that implements the logic described here, including libvirt-lxc for example.
+\\
+\\
+machinectl is not the only tool that is useful in conjunction with containers. Many of systemd's own tools have been updated to explicitly support containers too! Let's try this (after starting the container up again first, repeating the systemd-nspawn command from above.):
+\begin{lstlisting}
+# hostnamectl -M mycontainer set-hostname "wuff"
+\end{lstlisting}
+This uses hostnamectl(1) on the local container and sets its hostname.
+\\
+\\
+Similar, many other tools have been updated for connecting to local containers. Here's systemctl(1)'s -M switch in action:
+\begin{lstlisting}
+# systemctl -M mycontainer
+UNIT                                 LOAD   ACTIVE SUB       DESCRIPTION 
+-.mount                              loaded active mounted   /
+dev-hugepages.mount                  loaded active mounted   Huge Pages F
+dev-mqueue.mount                     loaded active mounted   POSIX Messag
+proc-sys-kernel-random-boot_id.mount loaded active mounted   /proc/sys/ke
+[...]
+time-sync.target                     loaded active active    System Time 
+timers.target                        loaded active active    Timers
+systemd-tmpfiles-clean.timer         loaded active waiting   Daily Cleanu
+
+LOAD   = Reflects whether the unit definition was properly loaded.
+ACTIVE = The high-level unit activation state, i.e. generalization of SUB
+SUB    = The low-level unit activation state, values depend on unit type.
+
+49 loaded units listed. Pass --all to see loaded but inactive units, too.
+To show all installed unit files use 'systemctl list-unit-files'.
+\end{lstlisting}
+As expected, this shows the list of active units on the specified container, not the host. (Output is shortened here, the blog story is already getting too long).
+\\
+\\
+Let's use this to restart a service within our container:
+\begin{lstlisting}
+# systemctl -M mycontainer restart systemd-resolved.service
+\end{lstlisting}
+systemctl has more container support though than just the -M switch. With the -r switch it shows the units running on the host, plus all units of all local, running containers:
+\begin{lstlisting}
+# systemctl -r
+UNIT                                        LOAD   ACTIVE SUB       DESCR
+boot.automount                              loaded active waiting   EFI S
+proc-sys-fs-binfmt_misc.automount           loaded active waiting   Arbit
+sys-devices-pci0000:00-0000:00:02.0-drm-card0-card0\x2dLVDS\x2d1-intel_ba
+[...]
+timers.target                                                            
+mandb.timer                                                              
+systemd-tmpfiles-clean.timer                                             
+mycontainer:-.mount                                                      
+mycontainer:dev-hugepages.mount                                          
+mycontainer:dev-mqueue.mount                                             
+[...]
+mycontainer:time-sync.target                                             
+mycontainer:timers.target                                                
+mycontainer:systemd-tmpfiles-clean.timer                                 
+
+LOAD   = Reflects whether the unit definition was properly loaded.
+ACTIVE = The high-level unit activation state, i.e. generalization of SUB
+SUB    = The low-level unit activation state, values depend on unit type.
+
+191 loaded units listed. Pass --all to see loaded but inactive units, too.
+To show all installed unit files use 'systemctl list-unit-files'.
+\end{lstlisting}
+We can see here first the units of the host, then followed by the units of the one container we have currently running. The units of the containers are prefixed with the container name, and a colon (":"). (The output is shortened again for brevity's sake.)
+\\
+\\
+The list-machines subcommand of systemctl shows a list of all running containers, inquiring the system managers within the containers about system state and health. More specifically it shows if containers are properly booted up, or if there are any failed services:
+\begin{lstlisting}
+# systemctl list-machines
+NAME         STATE   FAILED JOBS
+delta (host) running      0    0
+mycontainer  running      0    0
+miau         degraded     1    0
+waldi        running      0    0
+
+4 machines listed.
+\end{lstlisting}
+To make things more interesting we have started two more containers in parallel. One of them has a failed service, which results in the machine state to be degraded.
+\\
+\\
+Let's have a look at journalctl(1)'s container support. It too supports -M to show the logs of a specific container:
+\begin{lstlisting}
+# journalctl -M mycontainer -n 8
+Nov 12 16:51:13 wuff systemd[1]: Starting Graphical Interface.
+Nov 12 16:51:13 wuff systemd[1]: Reached target Graphical Inte
+Nov 12 16:51:13 wuff systemd[1]: Starting Update UTMP about Sy
+Nov 12 16:51:13 wuff systemd[1]: Started Stop Read-Ahead Data 
+Nov 12 16:51:13 wuff systemd[1]: Started Update UTMP about Sys
+Nov 12 16:51:13 wuff systemd[1]: Startup finished in 399ms.
+Nov 12 16:51:13 wuff sshd[35]: Server listening on 0.0.0.0 por
+Nov 12 16:51:13 wuff sshd[35]: Server listening on :: port 24.
+\end{lstlisting}
+However, it also supports -m to show the combined log stream of the host and all local containers:
+\begin{lstlisting}
+# journalctl -m -e
+\end{lstlisting}
+(Let's skip the output here completely, I figure you can extrapolate how this looks.)
+\\
+\\
+But it's not only systemd's own tools that understand container support these days, procps sports support for it, too:
+\begin{lstlisting}
+# ps -eo pid,machine,args
+ PID MACHINE                         COMMAND
+   1 -                               /usr/lib/systemd/systemd --switch
+[...]
+2915 -                               emacs contents/projects/container
+3403 -                               [kworker/u16:7]
+3415 -                               [kworker/u16:9]
+4501 -                               /usr/libexec/nm-vpnc-service
+4519 -                               /usr/sbin/vpnc --non-inter --no-d
+4749 -                               /usr/libexec/dconf-service
+4980 -                               /usr/lib/systemd/systemd-resolved
+5006 -                               /usr/lib64/firefox/firefox
+5168 -                               [kworker/u16:0]
+5192 -                               [kworker/u16:4]
+5193 -                               [kworker/u16:5]
+5497 -                               [kworker/u16:1]
+5591 -                               [kworker/u16:8]
+5711 -                               sudo -s
+5715 -                               /bin/bash
+5749 -                               /home/lennart/projects/systemd/sy
+5750 mycontainer                     /usr/lib/systemd/systemd
+5799 mycontainer                     /usr/lib/systemd/systemd-journald
+5862 mycontainer                     /usr/lib/systemd/systemd-logind
+5863 mycontainer                     /bin/dbus-daemon --system --addre
+5868 mycontainer                     /sbin/agetty --noclear --keep-bau
+5871 mycontainer                     /usr/sbin/sshd -D
+6527 mycontainer                     /usr/lib/systemd/systemd-resolved
+[...]
+\end{lstlisting}
+This shows a process list (shortened). The second column shows the container a process belongs to. All processes shown with "-" belong to the host itself.
+\\
+\\
+But it doesn't stop there. The new "sd-bus" D-Bus client library we have been preparing in the systemd/kdbus context knows containers too. While you use sd\_bus\_open\_system() to connect to your local host's system bus sd\_bus\_open\_system\_container() may be used to connect to the system bus of any local container, so that you can execute bus methods on it.
+\\
+\\
+sd-login.h and machined's bus interface provide a number of APIs to add container support to other programs too. They support enumeration of containers as well as retrieving the machine name from a PID and similar.
+\\
+\\
+systemd-networkd also has support for containers. When run inside a container it will by default run a DHCP client and IPv4LL on any veth network interface named host0 (this interface is special under the logic described here). When run on the host networkd will by default provide a DHCP server and IPv4LL on veth network interface named ve- followed by a container name.
+\\
+\\
+Let's have a look at one last facet of systemd's container integration: the hook-up with the name service switch. Recent systemd versions contain a new NSS module nss-mymachines that make the names of all local containers resolvable via gethostbyname() and getaddrinfo(). This only applies to containers that run within their own network namespace. With the systemd-nspawn command shown above the the container shares the network configuration with the host however; hence let's restart the container, this time with a virtual veth network link between host and container:
+\begin{lstlisting}
+# machinectl poweroff mycontainer
+# systemd-nspawn -D /srv/mycontainer --network-veth -b
+\end{lstlisting}
+Now, (assuming that networkd is used in the container and outside) we can already ping the container using its name, due to the simple magic of nss-mymachines:
+\begin{lstlisting}
+# ping mycontainer
+PING mycontainer (10.0.0.2) 56(84) bytes of data.
+64 bytes from mycontainer (10.0.0.2): icmp_seq=1 ttl=64 time=0.124 ms
+64 bytes from mycontainer (10.0.0.2): icmp_seq=2 ttl=64 time=0.078 ms
+\end{lstlisting}
+Of course, name resolution not only works with ping, it works with all other tools that use libc gethostbyname() or getaddrinfo() too, among them venerable ssh.
+\\
+\\
+And this is pretty much all I want to cover for now. We briefly touched a variety of integration points, and there's a lot more still if you look closely. We are working on even more container integration all the time, so expect more new features in this area with every systemd release.
+\\
+\\
+Note that the whole machine concept is actually not limited to containers, but covers VMs too to a certain degree. However, the integration is not as close, as access to a VM's internals is not as easy as for containers, as it usually requires a network transport instead of allowing direct syscall access.
+\\
+\\
+Anyway, I hope this is useful. For further details, please have a look at the linked man pages and other documentation.
 \section{references}
 \nocite{*}
 \bibliography{references}
